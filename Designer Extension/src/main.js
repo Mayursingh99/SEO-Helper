@@ -132,6 +132,7 @@ const App = () => {
       
       // Get OAuth authorization URL
       const response = await axios.get(`${backendUrl}/auth`);
+      console.log(response);
       const { authorizeUrl } = response.data;
       
       // Open OAuth popup

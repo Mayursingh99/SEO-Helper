@@ -109,6 +109,13 @@ app.get('/auth', (req, res) => {
   const state = Math.random().toString(36).substring(7);
   const authorizeUrl = `https://webflow.com/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code&scope=sites:read%20pages:read%20pages:write&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URI)}&state=${state}`;
   
+  console.log('OAuth authorization URL generated:', {
+    client_id: OAUTH_CLIENT_ID,
+    redirect_uri: OAUTH_REDIRECT_URI,
+    encoded_redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI),
+    full_url: authorizeUrl
+  });
+  
   res.json({ 
     authorizeUrl: authorizeUrl,
     message: 'OAuth authorization URL generated'
@@ -146,8 +153,14 @@ app.get('/callback', async (req, res) => {
     const tokenData = querystring.stringify({
       client_id: OAUTH_CLIENT_ID,
       client_secret: OAUTH_CLIENT_SECRET,
-    code: code,
+      code: code,
       grant_type: 'authorization_code',
+      redirect_uri: OAUTH_REDIRECT_URI
+    });
+
+    console.log('Token exchange request:', {
+      url: 'https://webflow.com/oauth/access_token',
+      data: tokenData,
       redirect_uri: OAUTH_REDIRECT_URI
     });
 
@@ -156,6 +169,8 @@ app.get('/callback', async (req, res) => {
         'Content-Type': 'application/x-www-form-urlencoded'
       }
     });
+
+    console.log('Token exchange response:', tokenResponse.data);
 
     if (!tokenResponse.data.access_token) {
       throw new Error('No access token received from Webflow');
