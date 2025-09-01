@@ -57,7 +57,8 @@ app.use(cookieSession({
   keys: [process.env.SESSION_SECRET || 'default-secret-key'],
   maxAge: 24 * 60 * 60 * 1000, // 24 hours
   secure: process.env.NODE_ENV === 'production',
-  httpOnly: true
+  httpOnly: true,
+  sameSite: 'none' // Allow cross-site cookies for Webflow extensions
 }));
 
 // Webflow API configuration
@@ -107,6 +108,19 @@ app.get('/health', (req, res) => {
   };
   
   res.json(health);
+});
+
+// Session check endpoint for debugging
+app.get('/session', (req, res) => {
+  const sessionInfo = {
+    hasSession: !!req.session,
+    hasAccessToken: !!req.session?.accessToken,
+    hasSiteId: !!req.session?.siteId,
+    sessionId: req.sessionID,
+    timestamp: new Date().toISOString()
+  };
+  
+  res.json(sessionInfo);
 });
 
 // OAuth Authorization endpoint using official Webflow approach
