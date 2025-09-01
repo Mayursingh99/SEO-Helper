@@ -13,7 +13,6 @@ const PORT = process.env.PORT || 10000;
 // Middleware
 const allowedOrigins = [
   'https://webflow.com',
-  'https://*.webflow.com',
   'https://designer.webflow.com',
   'https://seo-helper.onrender.com',
   process.env.NODE_ENV === 'development' ? 'http://localhost:1337' : null
@@ -24,11 +23,13 @@ app.use(cors({
     // Allow requests with no origin (mobile apps, curl, etc.)
     if (!origin) return callback(null, true);
     
-    // Check if origin is in allowed list or matches webflow pattern
-    if (allowedOrigins.some(allowed => 
-      allowed === origin || 
-      (allowed.includes('*') && origin.includes('webflow.com'))
-    )) {
+    // Allow all Webflow domains and subdomains
+    if (origin.includes('webflow.com') || origin.includes('webflow-ext.com')) {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin)) {
       return callback(null, true);
     }
     
@@ -549,7 +550,7 @@ app.use('*', (req, res) => {
   });
 });
 
-    app.listen(PORT, () => {
+app.listen(PORT, () => {
   console.log(`🚀 SEO Helper Backend running on port ${PORT}`);
   console.log(`📊 Health check: http://localhost:${PORT}/health`);
   console.log(`🔐 OAuth login: http://localhost:${PORT}/auth`);
