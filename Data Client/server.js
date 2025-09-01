@@ -14,6 +14,7 @@ const allowedOrigins = [
   'https://webflow.com',
   'https://*.webflow.com',
   'https://designer.webflow.com',
+  'https://seo-helper.onrender.com',
   process.env.NODE_ENV === 'development' ? 'http://localhost:1337' : null
 ].filter(Boolean);
 
@@ -30,11 +31,17 @@ app.use(cors({
       return callback(null, true);
     }
     
+    // Allow Render domain
+    if (origin && origin.includes('onrender.com')) {
+      return callback(null, true);
+    }
+    
     // Allow in development
     if (process.env.NODE_ENV === 'development') {
       return callback(null, true);
     }
     
+    console.log('CORS blocked origin:', origin);
     callback(new Error('Not allowed by CORS'));
   },
   credentials: true,
@@ -107,7 +114,9 @@ app.get('/auth', (req, res) => {
   }
 
   const state = Math.random().toString(36).substring(7);
-  const authorizeUrl = `https://webflow.com/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code&scope=sites:read%20pages:read%20pages:write&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URI)}&state=${state}`;
+  // Use space-separated scopes (not URL encoded)
+  const scope = 'sites:read pages:read pages:write';
+  const authorizeUrl = `https://webflow.com/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URI)}&state=${state}`;
   
   console.log('OAuth authorization URL generated:', {
     client_id: OAUTH_CLIENT_ID,
@@ -171,6 +180,12 @@ app.get('/callback', async (req, res) => {
     });
 
     console.log('Token exchange response:', tokenResponse.data);
+
+    // Check for OAuth errors
+    if (tokenResponse.data.error) {
+      console.error('OAuth error response:', tokenResponse.data);
+      throw new Error(`OAuth error: ${tokenResponse.data.error} - ${tokenResponse.data.error_description || 'Unknown error'}`);
+    }
 
     if (!tokenResponse.data.access_token) {
       throw new Error('No access token received from Webflow');
