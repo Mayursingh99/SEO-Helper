@@ -228,15 +228,60 @@ app.get('/callback', async (req, res) => {
 
     console.log(`Hybrid App OAuth successful for site: ${siteId} (${siteShortName})`);
 
-    res.json({ 
-      success: true, 
-      message: 'Hybrid App authorization successful',
-      siteId: siteId,
-      siteShortName: siteShortName,
-      siteName: sitesResponse.data.sites[0].name || sitesResponse.data.sites[0].shortName,
-      deepLinkUrl: `https://${siteShortName}.design.webflow.com?app=${OAUTH_CLIENT_ID}`,
-      accessToken: accessToken // Include access token for frontend storage
-    });
+    // Return HTML that will send the token to the parent window and close
+    const successHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>OAuth Success</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; }
+          .success { background: rgba(255,255,255,0.1); padding: 30px; border-radius: 15px; backdrop-filter: blur(10px); }
+          .spinner { border: 3px solid rgba(255,255,255,0.3); border-top: 3px solid white; border-radius: 50%; width: 30px; height: 30px; animation: spin 1s linear infinite; margin: 20px auto; }
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        </style>
+      </head>
+      <body>
+        <div class="success">
+          <h2>✅ Authorization Successful!</h2>
+          <p>You can now close this window and return to the app.</p>
+          <div class="spinner"></div>
+          <p><small>This window will close automatically...</small></p>
+        </div>
+        <script>
+          // Send the access token to the parent window
+          if (window.opener) {
+            window.opener.postMessage({
+              type: 'OAUTH_SUCCESS',
+              accessToken: '${accessToken}',
+              siteId: '${siteId}',
+              siteShortName: '${siteShortName}'
+            }, '*');
+            
+            // Close the popup after a short delay
+            setTimeout(() => {
+              window.close();
+            }, 2000);
+          } else {
+            // Fallback if no opener (direct navigation)
+            localStorage.setItem('seo-helper-oauth-token', JSON.stringify({
+              accessToken: '${accessToken}',
+              siteId: '${siteId}',
+              siteShortName: '${siteShortName}',
+              timestamp: Date.now()
+            }));
+            
+            // Redirect to a success page or close
+            setTimeout(() => {
+              window.close();
+            }, 2000);
+          }
+        </script>
+      </body>
+      </html>
+    `;
+
+    res.send(successHtml);
 
   } catch (error) {
     console.error('OAuth callback error:', error);
@@ -248,12 +293,38 @@ app.get('/callback', async (req, res) => {
       console.error('Error response headers:', error.response.headers);
     }
     
-    res.status(500).json({ 
-      error: 'OAuth callback failed',
-      details: error.message || 'Unknown error occurred',
-      status: error.response?.status || 'unknown',
-      responseData: error.response?.data || 'none'
-    });
+    // Return error HTML
+    const errorHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>OAuth Error</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; }
+          .error { background: rgba(255,255,255,0.1); padding: 30px; border-radius: 15px; backdrop-filter: blur(10px); }
+        </style>
+      </head>
+      <body>
+        <div class="error">
+          <h2>❌ Authorization Failed</h2>
+          <p>Error: ${error.message || 'Unknown error occurred'}</p>
+          <p>Please try again or contact support.</p>
+          <button onclick="window.close()" style="padding: 10px 20px; border: none; border-radius: 5px; background: white; color: #e74c3c; cursor: pointer;">Close Window</button>
+        </div>
+        <script>
+          // Send error to parent window
+          if (window.opener) {
+            window.opener.postMessage({
+              type: 'OAUTH_ERROR',
+              error: '${error.message || 'Unknown error occurred'}'
+            }, '*');
+          }
+        </script>
+      </body>
+      </html>
+    `;
+    
+    res.send(errorHtml);
   }
 });
 
