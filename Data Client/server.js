@@ -98,6 +98,8 @@ app.get('/health', (req, res) => {
       callback: '/callback',
       deepLink: '/deep-link',
       pages: '/pages',
+      pageMetadata: '/pages/:id',
+      updatePage: 'PATCH /pages/:id',
       site: '/site',
       logout: '/logout'
     }
@@ -294,10 +296,15 @@ app.get('/pages', async (req, res) => {
     }
 
     // Fetch pages from Webflow Data API v2 using official endpoint
+    // Reference: https://developers.webflow.com/data/reference/pages-and-components/pages/list
     const response = await axios.get(`${WEBFLOW_API_BASE}/sites/${siteId}/pages`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/json'
+      },
+      params: {
+        limit: 100, // Get up to 100 pages
+        offset: 0
       }
     });
 
@@ -368,7 +375,8 @@ app.patch('/pages/:id', async (req, res) => {
       });
     }
 
-    // Update page via Webflow API
+    // Update page via Webflow Data API v2 using official endpoint
+    // Reference: https://developers.webflow.com/data/reference/pages-and-components/pages/update-page-settings
     const response = await axios.patch(`${WEBFLOW_API_BASE}/pages/${id}`, {
       seo: {
         title: seo.title || '',
@@ -410,6 +418,54 @@ app.patch('/pages/:id', async (req, res) => {
     res.status(500).json({ 
       error: 'Failed to update page SEO',
       details: error.message || 'Unknown error occurred'
+    });
+  }
+});
+
+// Get individual page metadata endpoint using official Webflow Data API v2
+// Reference: https://developers.webflow.com/data/reference/pages-and-components/pages/get-metadata
+app.get('/pages/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const accessToken = getUserToken(req);
+
+    if (!accessToken) {
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Please authorize the app first',
+        authorizeUrl: '/auth'
+      });
+    }
+
+    // Get page metadata from Webflow Data API v2
+    const response = await axios.get(`${WEBFLOW_API_BASE}/pages/${id}`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    res.json({ 
+      page: response.data,
+      apiVersion: 'v2',
+      endpoint: `/pages/${id}`
+    });
+
+  } catch (error) {
+    console.error('Error fetching page metadata:', error);
+    
+    if (error.response?.status === 401) {
+      clearUserSession(req);
+      return res.status(401).json({ 
+        error: 'Token expired',
+        message: 'Please re-authorize the app',
+        authorizeUrl: '/auth'
+      });
+    }
+
+    res.status(500).json({ 
+      error: 'Failed to fetch page metadata',
+      details: error.message
     });
   }
 });
