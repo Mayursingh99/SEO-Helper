@@ -95,6 +95,7 @@ app.get('/health', (req, res) => {
     endpoints: {
       auth: '/auth',
       callback: '/callback',
+      deepLink: '/deep-link',
       pages: '/pages',
       site: '/site',
       logout: '/logout'
@@ -104,7 +105,7 @@ app.get('/health', (req, res) => {
   res.json(health);
 });
 
-// OAuth Authorization endpoint
+// OAuth Authorization endpoint for Hybrid App
 app.get('/auth', (req, res) => {
   if (!OAUTH_CLIENT_ID || !OAUTH_REDIRECT_URI) {
     return res.status(500).json({ 
@@ -114,23 +115,23 @@ app.get('/auth', (req, res) => {
   }
 
   const state = Math.random().toString(36).substring(7);
-  // Use space-separated scopes matching Webflow app permissions exactly
-  // According to Webflow docs: scopes should be space-separated, NOT URL-encoded
-  const scope = 'authorized_user:read sites:read sites:write pages:read pages:write';
+  // For Hybrid Apps: Use minimal scopes for basic authentication
+  // According to Webflow Hybrid App docs: focus on essential permissions
+  const scope = 'authorized_user:read sites:read';
   const authorizeUrl = `https://webflow.com/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code&scope=${scope}&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URI)}&state=${state}`;
   
-  console.log('OAuth authorization URL generated:', {
+  console.log('OAuth authorization URL generated for Hybrid App:', {
     client_id: OAUTH_CLIENT_ID,
     redirect_uri: OAUTH_REDIRECT_URI,
     encoded_redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI),
     scope: scope,
-    encoded_scope: encodeURIComponent(scope),
     full_url: authorizeUrl
   });
   
   res.json({ 
     authorizeUrl: authorizeUrl,
-    message: 'OAuth authorization URL generated'
+    message: 'OAuth authorization URL generated for Hybrid App',
+    scope: scope
   });
 });
 
@@ -196,7 +197,15 @@ app.get('/callback', async (req, res) => {
 
     const accessToken = tokenResponse.data.access_token;
 
-    // Get user's sites to determine site ID
+    // For Hybrid Apps: Get user info and basic site access
+    const userResponse = await axios.get(`${WEBFLOW_API_BASE}/user`, {
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    // Get user's sites for Hybrid App functionality
     const sitesResponse = await axios.get(`${WEBFLOW_API_BASE}/sites`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -209,18 +218,23 @@ app.get('/callback', async (req, res) => {
     }
 
     const siteId = sitesResponse.data.sites[0].id;
+    const siteShortName = sitesResponse.data.sites[0].shortName;
     
-    // Store token in session
+    // Store tokens in session for Hybrid App
     setUserToken(req, accessToken);
     req.session.siteId = siteId;
+    req.session.siteShortName = siteShortName;
+    req.session.userId = userResponse.data.user?.id;
 
-    console.log(`OAuth successful for site: ${siteId}`);
+    console.log(`Hybrid App OAuth successful for site: ${siteId} (${siteShortName})`);
 
     res.json({ 
       success: true, 
-      message: 'Authorization successful',
+      message: 'Hybrid App authorization successful',
       siteId: siteId,
-      siteName: sitesResponse.data.sites[0].name || sitesResponse.data.sites[0].shortName
+      siteShortName: siteShortName,
+      siteName: sitesResponse.data.sites[0].name || sitesResponse.data.sites[0].shortName,
+      deepLinkUrl: `https://${siteShortName}.design.webflow.com?app=${OAUTH_CLIENT_ID}`
     });
 
   } catch (error) {
@@ -228,6 +242,39 @@ app.get('/callback', async (req, res) => {
     res.status(500).json({ 
       error: 'OAuth callback failed',
       details: error.message || 'Unknown error occurred'
+    });
+  }
+});
+
+// Deep linking endpoint for Hybrid App (as per Webflow docs)
+app.get('/deep-link', async (req, res) => {
+  try {
+    const accessToken = getUserToken(req);
+    const siteShortName = req.session.siteShortName;
+
+    if (!accessToken || !siteShortName) {
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Please complete OAuth authorization first',
+        authorizeUrl: '/auth'
+      });
+    }
+
+    // Generate deep link according to Webflow documentation
+    const deepLinkUrl = `https://${siteShortName}.design.webflow.com?app=${OAUTH_CLIENT_ID}`;
+    
+    res.json({ 
+      deepLinkUrl: deepLinkUrl,
+      siteShortName: siteShortName,
+      clientId: OAUTH_CLIENT_ID,
+      message: 'Deep link generated for Designer Extension'
+    });
+
+  } catch (error) {
+    console.error('Error generating deep link:', error);
+    res.status(500).json({ 
+      error: 'Failed to generate deep link',
+      details: error.message
     });
   }
 });
