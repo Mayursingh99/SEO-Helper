@@ -164,24 +164,99 @@ app.get('/callback', async (req, res) => {
 
     if (error) {
       console.error('OAuth error:', error, error_description);
-      return res.status(400).json({ 
-        error: 'OAuth authorization failed',
-        details: error_description || error
-      });
+      const errorHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>OAuth Error</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; }
+            .error { background: rgba(255,255,255,0.1); padding: 30px; border-radius: 15px; backdrop-filter: blur(10px); }
+          </style>
+        </head>
+        <body>
+          <div class="error">
+            <h2>❌ OAuth Error</h2>
+            <p>Error: ${error}</p>
+            <p>Details: ${error_description || 'No additional details'}</p>
+            <button onclick="window.close()" style="padding: 10px 20px; border: none; border-radius: 5px; background: white; color: #e74c3c; cursor: pointer;">Close Window</button>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                type: 'OAUTH_ERROR',
+                error: '${error}',
+                details: '${error_description || 'No additional details'}'
+              }, '*');
+            }
+          </script>
+        </body>
+        </html>
+      `;
+      return res.send(errorHtml);
     }
 
     if (!code) {
-      return res.status(400).json({ 
-        error: 'Missing authorization code',
-        message: 'No authorization code received from Webflow'
-      });
+      const errorHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>OAuth Error</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; }
+            .error { background: rgba(255,255,255,0.1); padding: 30px; border-radius: 15px; backdrop-filter: blur(10px); }
+          </style>
+        </head>
+        <body>
+          <div class="error">
+            <h2>❌ Missing Authorization Code</h2>
+            <p>No authorization code received from Webflow</p>
+            <button onclick="window.close()" style="padding: 10px 20px; border: none; border-radius: 5px; background: white; color: #e74c3c; cursor: pointer;">Close Window</button>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                type: 'OAUTH_ERROR',
+                error: 'Missing authorization code'
+              }, '*');
+            }
+          </script>
+        </body>
+        </html>
+      `;
+      return res.send(errorHtml);
     }
 
     if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET || !OAUTH_REDIRECT_URI) {
-      return res.status(500).json({ 
-        error: 'OAuth configuration missing',
-        message: 'Please configure all OAuth environment variables'
-      });
+      const errorHtml = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <title>OAuth Configuration Error</title>
+          <style>
+            body { font-family: Arial, sans-serif; text-align: center; padding: 50px; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; }
+            .error { background: rgba(255,255,255,0.1); padding: 30px; border-radius: 15px; backdrop-filter: blur(10px); }
+          </style>
+        </head>
+        <body>
+          <div class="error">
+            <h2>❌ Configuration Error</h2>
+            <p>OAuth environment variables are not properly configured</p>
+            <p>Please check: OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI</p>
+            <button onclick="window.close()" style="padding: 10px 20px; border: none; border-radius: 5px; background: white; color: #e74c3c; cursor: pointer;">Close Window</button>
+          </div>
+          <script>
+            if (window.opener) {
+              window.opener.postMessage({
+                type: 'OAUTH_ERROR',
+                error: 'OAuth configuration missing'
+              }, '*');
+            }
+          </script>
+        </body>
+        </html>
+      `;
+      return res.send(errorHtml);
     }
 
     // Exchange code for access token using official Webflow approach
