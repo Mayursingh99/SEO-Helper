@@ -203,8 +203,8 @@ app.get('/callback', async (req, res) => {
 
     const accessToken = tokenResponse.data.access_token;
 
-    // For Hybrid Apps: Get user info and basic site access
-    const userResponse = await axios.get(`${WEBFLOW_API_BASE}/user`, {
+    // For Hybrid Apps: Get user info using official Webflow Data API v2
+    const userResponse = await axios.get(`${WEBFLOW_API_BASE}/token/authorized_by`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/json'
@@ -316,7 +316,7 @@ app.get('/pages', async (req, res) => {
       });
     }
 
-    // Fetch pages from Webflow API
+    // Fetch pages from Webflow Data API v2 using official endpoint
     const response = await axios.get(`${WEBFLOW_API_BASE}/sites/${siteId}/pages`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
