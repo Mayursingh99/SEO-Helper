@@ -57,10 +57,12 @@ Click **"Environment"** tab and add these variables:
 
 1. **Go to [Webflow Apps](https://webflow.com/apps)**
 2. **Edit your SEO Helper app**
-3. **Update OAuth Redirect URI:**
+3. **Go to "OAuth" tab**
+4. **Update OAuth Redirect URI to EXACTLY:**
    ```
    https://seo-helper-backend.onrender.com/callback
    ```
+   ⚠️ **IMPORTANT:** This must match exactly - no extra spaces or characters!
 
 ## 🎯 **Step 7: Update Frontend**
 
