@@ -114,14 +114,16 @@ app.get('/auth', (req, res) => {
   }
 
   const state = Math.random().toString(36).substring(7);
-  // Use space-separated scopes (not URL encoded)
-  const scope = 'sites:read pages:read pages:write';
+  // Use space-separated scopes matching Webflow app permissions exactly
+  const scope = 'authorized_user:read sites:read sites:write pages:read pages:write';
   const authorizeUrl = `https://webflow.com/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code&scope=${encodeURIComponent(scope)}&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URI)}&state=${state}`;
   
   console.log('OAuth authorization URL generated:', {
     client_id: OAUTH_CLIENT_ID,
     redirect_uri: OAUTH_REDIRECT_URI,
     encoded_redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI),
+    scope: scope,
+    encoded_scope: encodeURIComponent(scope),
     full_url: authorizeUrl
   });
   
