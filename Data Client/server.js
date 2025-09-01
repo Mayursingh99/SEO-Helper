@@ -164,18 +164,21 @@ app.get('/callback', async (req, res) => {
     }
 
     // Exchange code for access token
+    // IMPORTANT: redirect_uri must match EXACTLY what was sent in authorization URL
     const tokenData = querystring.stringify({
       client_id: OAUTH_CLIENT_ID,
       client_secret: OAUTH_CLIENT_SECRET,
       code: code,
       grant_type: 'authorization_code',
-      redirect_uri: OAUTH_REDIRECT_URI
+      redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI)
     });
 
     console.log('Token exchange request:', {
       url: 'https://webflow.com/oauth/access_token',
       data: tokenData,
-      redirect_uri: OAUTH_REDIRECT_URI
+      redirect_uri: OAUTH_REDIRECT_URI,
+      encoded_redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI),
+      note: 'Using encoded redirect_uri to match authorization URL'
     });
 
     const tokenResponse = await axios.post('https://webflow.com/oauth/access_token', tokenData, {
