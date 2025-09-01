@@ -125,7 +125,8 @@ app.get('/auth', (req, res) => {
     redirect_uri: OAUTH_REDIRECT_URI,
     encoded_redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI),
     scope: scope,
-    full_url: authorizeUrl
+    full_url: authorizeUrl,
+    webflow_oauth_url: 'https://webflow.com/oauth/authorize'
   });
   
   res.json({ 
@@ -183,7 +184,9 @@ app.get('/callback', async (req, res) => {
       }
     });
 
-    console.log('Token exchange response:', tokenResponse.data);
+    console.log('Token exchange response status:', tokenResponse.status);
+    console.log('Token exchange response headers:', tokenResponse.headers);
+    console.log('Token exchange response data:', tokenResponse.data);
 
     // Check for OAuth errors
     if (tokenResponse.data.error) {
@@ -239,9 +242,19 @@ app.get('/callback', async (req, res) => {
 
   } catch (error) {
     console.error('OAuth callback error:', error);
+    
+    // Log detailed error information
+    if (error.response) {
+      console.error('Error response status:', error.response.status);
+      console.error('Error response data:', error.response.data);
+      console.error('Error response headers:', error.response.headers);
+    }
+    
     res.status(500).json({ 
       error: 'OAuth callback failed',
-      details: error.message || 'Unknown error occurred'
+      details: error.message || 'Unknown error occurred',
+      status: error.response?.status || 'unknown',
+      responseData: error.response?.data || 'none'
     });
   }
 });
