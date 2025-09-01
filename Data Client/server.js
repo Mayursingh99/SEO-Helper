@@ -7,7 +7,7 @@ const querystring = require('querystring');
 require('dotenv').config();
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 10000;
 
 // Middleware
 const allowedOrigins = [
@@ -422,9 +422,9 @@ app.use('*', (req, res) => {
 
     app.listen(PORT, () => {
   console.log(`🚀 SEO Helper Backend running on port ${PORT}`);
-  console.log(`📊 Health check: /health`);
-  console.log(`🔐 OAuth auth: /auth`);
-  console.log(`📄 Pages API: /pages`);
+  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`🔐 OAuth login: http://localhost:${PORT}/auth`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 
 module.exports = app;
