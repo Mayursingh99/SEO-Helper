@@ -4,6 +4,7 @@ const cors = require('cors');
 const bodyParser = require('body-parser');
 const cookieSession = require('cookie-session');
 const querystring = require('querystring');
+const { WebflowClient } = require('webflow-api');
 require('dotenv').config();
 
 const app = express();
@@ -105,7 +106,7 @@ app.get('/health', (req, res) => {
   res.json(health);
 });
 
-// OAuth Authorization endpoint for Hybrid App
+// OAuth Authorization endpoint using official Webflow approach
 app.get('/auth', (req, res) => {
   if (!OAUTH_CLIENT_ID || !OAUTH_REDIRECT_URI) {
     return res.status(500).json({ 
@@ -115,24 +116,27 @@ app.get('/auth', (req, res) => {
   }
 
   const state = Math.random().toString(36).substring(7);
-  // Use scopes that EXACTLY match your Webflow app permissions
-  // Sites: Read and write, Pages: Read and write, Authorized user: Read-only
-  const scope = 'authorized_user:read sites:read sites:write pages:read pages:write';
-  const authorizeUrl = `https://webflow.com/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code&scope=${scope}&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URI)}&state=${state}`;
   
-  console.log('OAuth authorization URL generated for Hybrid App:', {
+  // Use official WebflowClient.authorizeURL as per documentation
+  const authorizeUrl = WebflowClient.authorizeURL({
+    state: state,
+    scope: 'sites:read sites:write',  // Add necessary scopes as per Webflow docs
+    clientId: OAUTH_CLIENT_ID,
+    redirectUri: OAUTH_REDIRECT_URI,
+  });
+  
+  console.log('OAuth authorization URL generated using official WebflowClient:', {
     client_id: OAUTH_CLIENT_ID,
     redirect_uri: OAUTH_REDIRECT_URI,
-    encoded_redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI),
-    scope: scope,
+    scope: 'sites:read sites:write',
     full_url: authorizeUrl,
-    webflow_oauth_url: 'https://webflow.com/oauth/authorize'
+    method: 'WebflowClient.authorizeURL'
   });
   
   res.json({ 
     authorizeUrl: authorizeUrl,
-    message: 'OAuth authorization URL generated for Hybrid App',
-    scope: scope
+    message: 'OAuth authorization URL generated using official Webflow approach',
+    scope: 'sites:read sites:write'
   });
 });
 
@@ -163,45 +167,18 @@ app.get('/callback', async (req, res) => {
       });
     }
 
-    // Exchange code for access token
-    // IMPORTANT: redirect_uri must match EXACTLY what was sent in authorization URL
-    const tokenData = querystring.stringify({
-      client_id: OAUTH_CLIENT_ID,
-      client_secret: OAUTH_CLIENT_SECRET,
+    // Exchange code for access token using official Webflow approach
+    const accessToken = await WebflowClient.getAccessToken({
+      clientId: OAUTH_CLIENT_ID,
+      clientSecret: OAUTH_CLIENT_SECRET,
       code: code,
-      grant_type: 'authorization_code',
-      redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI)
-    });
-
-    console.log('Token exchange request:', {
-      url: 'https://webflow.com/oauth/access_token',
-      data: tokenData,
       redirect_uri: OAUTH_REDIRECT_URI,
-      encoded_redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI),
-      note: 'Using encoded redirect_uri to match authorization URL'
     });
 
-    const tokenResponse = await axios.post('https://webflow.com/oauth/access_token', tokenData, {
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
+    console.log('Access token received using official WebflowClient:', {
+      method: 'WebflowClient.getAccessToken',
+      success: !!accessToken
     });
-
-    console.log('Token exchange response status:', tokenResponse.status);
-    console.log('Token exchange response headers:', tokenResponse.headers);
-    console.log('Token exchange response data:', tokenResponse.data);
-
-    // Check for OAuth errors
-    if (tokenResponse.data.error) {
-      console.error('OAuth error response:', tokenResponse.data);
-      throw new Error(`OAuth error: ${tokenResponse.data.error} - ${tokenResponse.data.error_description || 'Unknown error'}`);
-    }
-
-    if (!tokenResponse.data.access_token) {
-      throw new Error('No access token received from Webflow');
-    }
-
-    const accessToken = tokenResponse.data.access_token;
 
     // For Hybrid Apps: Get user info using official Webflow Data API v2
     const userResponse = await axios.get(`${WEBFLOW_API_BASE}/token/authorized_by`, {
