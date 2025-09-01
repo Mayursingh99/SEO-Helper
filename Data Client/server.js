@@ -115,9 +115,9 @@ app.get('/auth', (req, res) => {
   }
 
   const state = Math.random().toString(36).substring(7);
-  // For Hybrid Apps: Use minimal scopes for basic authentication
-  // According to Webflow Hybrid App docs: focus on essential permissions
-  const scope = 'authorized_user:read sites:read';
+  // Use scopes that EXACTLY match your Webflow app permissions
+  // Sites: Read and write, Pages: Read and write, Authorized user: Read-only
+  const scope = 'authorized_user:read sites:read sites:write pages:read pages:write';
   const authorizeUrl = `https://webflow.com/oauth/authorize?client_id=${OAUTH_CLIENT_ID}&response_type=code&scope=${scope}&redirect_uri=${encodeURIComponent(OAUTH_REDIRECT_URI)}&state=${state}`;
   
   console.log('OAuth authorization URL generated for Hybrid App:', {
