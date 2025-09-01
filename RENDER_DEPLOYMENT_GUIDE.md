@@ -45,7 +45,7 @@ Click **"Environment"** tab and add these variables:
 | `SESSION_SECRET` | `seo_helper_prod_2024_secure_session_key_87a0757ae6eab55e1c794baf2aada7071f73e6dd65ff46db31da8aca2a87150b` |
 | `OAUTH_CLIENT_ID` | `87a0757ae6eab55e1c794baf2aada7071f73e6dd65ff46db31da8aca2a87150b` |
 | `OAUTH_CLIENT_SECRET` | `[Your actual OAuth client secret from Webflow]` |
-| `OAUTH_REDIRECT_URI` | `https://seo-helper-backend.onrender.com/callback` |
+| `OAUTH_REDIRECT_URI` | `https://seo-helper.onrender.com/callback` |
 
 ## 🚀 **Step 5: Deploy**
 
@@ -60,7 +60,7 @@ Click **"Environment"** tab and add these variables:
 3. **Go to "OAuth" tab**
 4. **Update OAuth Redirect URI to EXACTLY:**
    ```
-   https://seo-helper-backend.onrender.com/callback
+   https://seo-helper.onrender.com/callback
    ```
    ⚠️ **IMPORTANT:** This must match exactly - no extra spaces or characters!
 
@@ -69,7 +69,7 @@ Click **"Environment"** tab and add these variables:
 1. **Go to `Designer Extension` folder**
 2. **Edit `.env` file:**
    ```env
-   BACKEND_URL=https://seo-helper-backend.onrender.com
+   BACKEND_URL=https://seo-helper.onrender.com
    ```
 3. **Build frontend:**
    ```bash
@@ -79,7 +79,7 @@ Click **"Environment"** tab and add these variables:
 
 ## ✅ **Step 8: Test & Submit**
 
-1. **Test your backend:** Visit `https://seo-helper-backend.onrender.com/health`
+1. **Test your backend:** Visit `https://seo-helper.onrender.com/health`
 2. **Upload new bundle** to Webflow
 3. **Submit to marketplace!**
 

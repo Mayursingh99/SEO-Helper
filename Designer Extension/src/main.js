@@ -84,7 +84,7 @@ const App = () => {
           setSelectedSite(site);
           
           // Set backend URL for API calls - use environment variable or default to production
-          const backendUrl = process.env.BACKEND_URL || 'https://seo-helper-backend.onrender.com';
+          const backendUrl = process.env.BACKEND_URL || 'https://seo-helper.onrender.com';
           setBackendUrl(backendUrl);
           
           // Check if user is already authorized

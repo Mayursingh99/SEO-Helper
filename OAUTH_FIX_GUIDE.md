@@ -22,7 +22,7 @@ The OAuth redirect URI in your Webflow app settings doesn't match your Render ba
 3. Go to **"OAuth"** tab
 4. **Update OAuth Redirect URI** to:
    ```
-   https://seo-helper-backend.onrender.com/callback
+   https://seo-helper.onrender.com/callback
    ```
 5. **Save changes**
 
@@ -31,7 +31,7 @@ The OAuth redirect URI in your Webflow app settings doesn't match your Render ba
 2. **Create `.env` file** (copy from `env.sample`)
 3. **Set the correct backend URL:**
    ```env
-   BACKEND_URL=https://seo-helper-backend.onrender.com
+   BACKEND_URL=https://seo-helper.onrender.com
    ```
 
 ### **Step 4: Rebuild Frontend**
