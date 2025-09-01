@@ -1,24 +1,40 @@
 {
-  "name": "hybrid-app-jwt-3",
+  "name": "seo-helper-webflow-app",
   "version": "1.0.0",
-  "description": "",
+  "description": "A hybrid Webflow app for managing SEO metadata with automatic OAuth authorization",
   "main": "index.js",
   "scripts": {
-    "install": "npm run install-frontend && npm run install-backend",
-    "install-frontend": "cd Designer\\ Extension && npm i",
-    "install-backend": "cd Data\\ Client && npm i",
-    "dev": "concurrently \"cd Data\\ Client && npm run dev\" \"cd Designer\\ Extension && npm run dev\"",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "install-all": "npm run install-frontend && npm run install-backend",
+    "install-frontend": "cd \"Designer Extension\" && npm install",
+    "install-backend": "cd \"Data Client\" && npm install",
+    "build-frontend": "cd \"Designer Extension\" && npm run build",
+    "dev-frontend": "cd \"Designer Extension\" && npm run dev",
+    "dev-backend": "cd \"Data Client\" && npm run dev",
+    "start-backend": "cd \"Data Client\" && npm start",
+    "deploy-backend": "cd \"Data Client\" && git push heroku main",
+    "test": "echo \"No tests specified\" && exit 0",
+    "clean": "rimraf \"Designer Extension/node_modules\" \"Data Client/node_modules\" \"Designer Extension/public/bundle.js\" \"Designer Extension/bundle.zip\""
   },
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "webflow",
+    "seo",
+    "metadata",
+    "designer-extension",
+    "hybrid-app",
+    "oauth",
+    "react"
+  ],
+  "author": "SEO Helper Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/seo-helper-webflow-app.git"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
   "devDependencies": {
-    "concurrently": "^8.2.2",
-    "crypto-browserify": "^3.12.0",
-    "os-browserify": "^0.3.0",
-    "path-browserify": "^1.0.1"
-  },
-  "dependencies": {
-    "path": "^0.12.7"
+    "rimraf": "^3.0.2"
   }
 }
