@@ -234,7 +234,8 @@ app.get('/callback', async (req, res) => {
       siteId: siteId,
       siteShortName: siteShortName,
       siteName: sitesResponse.data.sites[0].name || sitesResponse.data.sites[0].shortName,
-      deepLinkUrl: `https://${siteShortName}.design.webflow.com?app=${OAUTH_CLIENT_ID}`
+      deepLinkUrl: `https://${siteShortName}.design.webflow.com?app=${OAUTH_CLIENT_ID}`,
+      accessToken: accessToken // Include access token for frontend storage
     });
 
   } catch (error) {
