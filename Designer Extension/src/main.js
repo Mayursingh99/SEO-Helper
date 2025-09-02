@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect } from "react";
 import ReactDOM from "react-dom/client";
 import axios from "axios";
 import { ThemeProvider } from "@mui/material/styles";
 import Button from "@mui/material/Button";
 import Container from "@mui/material/Container";
 import Typography from "@mui/material/Typography";
+import Paper from "@mui/material/Paper";
 import TextField from "@mui/material/TextField";
 import MenuItem from "@mui/material/MenuItem";
 import Select from "@mui/material/Select";
@@ -23,6 +24,7 @@ import Grid from "@mui/material/Grid";
 import Tooltip from "@mui/material/Tooltip";
 import IconButton from "@mui/material/IconButton";
 import RefreshIcon from "@mui/icons-material/Refresh";
+import InfoIcon from "@mui/icons-material/Info";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import WarningIcon from "@mui/icons-material/Warning";
 import ErrorIcon from "@mui/icons-material/Error";
@@ -39,11 +41,21 @@ const App = () => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [successMessage, setSuccessMessage] = useState("");
-  const [backendUrl, setBackendUrl] = useState("");
-  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Backend URL - use environment variable or default to production
+  const BACKEND_URL = process.env.BACKEND_URL || 'https://seo-helper.onrender.com';
+  
+  // Create axios instance with credentials
+  const api = axios.create({
+    baseURL: BACKEND_URL,
+    withCredentials: true,
+    timeout: 10000
+  });
 
   // SEO Analytics calculations
-  const seoAnalytics = useMemo(() => {
+  const seoAnalytics = React.useMemo(() => {
     if (!pages.length) return null;
     
     const totalPages = pages.length;
@@ -73,156 +85,279 @@ const App = () => {
     if (typeof webflow !== 'undefined') {
       webflow.setExtensionSize("large");
       
-      const boot = async () => {
+      const initializeApp = async () => {
         try {
           // Get site info from Webflow Designer Extension API
+          // Reference: https://developers.webflow.com/designer/reference/pages-overview
           const info = await webflow.getSiteInfo();
           const siteId = info.siteId;
           const displayName = info?.siteName || info?.displayName || info?.shortName || siteId;
           const site = { id: siteId, displayName };
-
+          
           setSelectedSite(site);
           
-          // Set backend URL for API calls - use environment variable or default to production
-          const backendUrl = process.env.BACKEND_URL || 'https://seo-helper.onrender.com';
-          setBackendUrl(backendUrl);
-          
-          // Check if user is already authorized
-          await checkAuthorization();
+          // Check if user is already authenticated (local storage + backend check)
+          await checkPersistentAuthentication();
         } catch (e) {
-          setError(`Initialization error: ${e?.message || "Failed to initialize"}`);
+          console.error('Initialization error:', e);
+          setError(`Failed to initialize: ${e.message}`);
         }
       };
 
-      boot();
+      initializeApp();
     } else {
-      // Development mode - show demo data
-      setSelectedSite({ id: "demo-site", displayName: "Demo Site" });
-      setPages([
-        { id: "1", title: "Home", slug: "home", seo: { title: "Welcome to Our Site", description: "The best website ever" } },
-        { id: "2", title: "About", slug: "about", seo: { title: "About Us", description: "" } },
-        { id: "3", title: "Contact", slug: "contact", seo: { title: "", description: "Get in touch with us" } },
-        { id: "4", title: "Services", slug: "services", seo: { title: "", description: "" } }
-      ]);
+      // Not in Webflow environment - show error
+      setError("This app must be run within the Webflow Designer");
     }
+
+    // Add message listener for OAuth callbacks from popup
+    // Following Webflow Hybrid App guidelines for secure communication
+    const handleMessage = (event) => {
+      // Only accept messages from our backend domain
+      if (event.origin !== BACKEND_URL.replace('https://', '').replace('http://', '')) {
+        return;
+      }
+
+      if (event.data.type === 'OAUTH_SUCCESS') {
+        const { accessToken, siteId, siteShortName } = event.data;
+        handleOAuthCallback(accessToken, siteId, siteShortName);
+      } else if (event.data.type === 'OAUTH_ERROR') {
+        setError(`OAuth failed: ${event.data.error}`);
+        if (event.data.details) {
+          console.error('OAuth error details:', event.data.details);
+        }
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
   }, []);
 
-  const checkAuthorization = async () => {
+  // Check persistent authentication status
+  const checkPersistentAuthentication = async () => {
     try {
-      const response = await axios.get(`${backendUrl}/pages`, {
-        withCredentials: true,
-        timeout: 5000
-      });
+      setError("");
+      
+      // Check local storage for stored OAuth token
+      const storedToken = localStorage.getItem('seo-helper-oauth-token');
+      const hasStoredToken = storedToken && JSON.parse(storedToken).accessToken;
+      
+      if (hasStoredToken) {
+        // User has stored token, try to use it
+        try {
+          // Set the token in axios headers for this request
+          const tokenData = JSON.parse(storedToken);
+          const tempApi = axios.create({
+            baseURL: BACKEND_URL,
+            timeout: 10000,
+            headers: {
+              'Authorization': `Bearer ${tokenData.accessToken}`
+            }
+          });
+          
+          // Test if token is still valid by making a request
+          const response = await tempApi.get('/pages');
+          
+          if (response.data.pages) {
+            // Token is valid, user is authenticated
+            setIsAuthenticated(true);
+            setPages(response.data.pages);
+            setSuccessMessage("Welcome back! Your pages are loaded.");
+            setTimeout(() => setSuccessMessage(""), 3000);
+            
+            // Update the main api instance with the valid token
+            api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.accessToken}`;
+            return;
+          }
+        } catch (error) {
+          if (error.response?.status === 401) {
+            // Token expired, clear stored token and show login
+            localStorage.removeItem('seo-helper-oauth-token');
+            setIsAuthenticated(false);
+            setPages([]);
+            console.log('Stored OAuth token expired, re-authorization needed');
+          } else {
+            // Other error, try to continue with stored token
+            console.warn('Token validation failed, using stored token:', error.message);
+            setIsAuthenticated(true);
+            // Try to get pages again
+            await checkAuthenticationStatus();
+          }
+        }
+      } else {
+        // No stored token, user needs to authorize
+        setIsAuthenticated(false);
+        setPages([]);
+      }
+    } catch (error) {
+      console.error('Persistent authentication check failed:', error);
+      setError("Failed to check authentication status");
+    }
+  };
+
+  const checkAuthenticationStatus = async () => {
+    try {
+      setError("");
+      
+      // Check if we have a stored token first
+      const storedToken = localStorage.getItem('seo-helper-oauth-token');
+      if (storedToken) {
+        const tokenData = JSON.parse(storedToken);
+        // Set the stored token in headers
+        api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.accessToken}`;
+      }
+      
+      // Try to get pages with current authorization
+      const response = await api.get('/pages');
       
       if (response.data.pages) {
-        setIsAuthorized(true);
+        // User is authenticated
+        setIsAuthenticated(true);
         setPages(response.data.pages);
+        
+        setSuccessMessage("Successfully connected to backend!");
+        setTimeout(() => setSuccessMessage(""), 3000);
       }
     } catch (error) {
       if (error.response?.status === 401) {
-        setIsAuthorized(false);
+        // User is not authenticated
+        setIsAuthenticated(false);
+        setPages([]);
+        localStorage.removeItem('seo-helper-oauth-token');
+        delete api.defaults.headers.common['Authorization'];
+      } else {
+        console.error('Authentication check failed:', error);
+        setError("Failed to check authentication status");
       }
     }
   };
 
-  const startOAuth = async () => {
+  const startOAuthFlow = async () => {
     try {
-      setLoading(true);
+      setAuthLoading(true);
       setError("");
       
-      // Get OAuth authorization URL
-      const response = await axios.get(`${backendUrl}/auth`);
-      console.log(response);
+      // Get OAuth authorization URL from backend
+      const response = await api.get('/auth');
       const { authorizeUrl } = response.data;
+      
+      if (!authorizeUrl) {
+        throw new Error('No authorization URL received');
+      }
       
       // Open OAuth popup
       const popup = window.open(
         authorizeUrl,
         'webflow-oauth',
-        'width=500,height=600,scrollbars=yes,resizable=yes'
+        'width=600,height=700,scrollbars=yes,resizable=yes,status=yes'
       );
       
-      // Poll for popup closure and check authorization
+      if (!popup) {
+        throw new Error('Popup blocked. Please allow popups for this site.');
+      }
+      
+      // Poll for popup closure and check authentication
       const checkClosed = setInterval(async () => {
         if (popup.closed) {
           clearInterval(checkClosed);
-          await checkAuthorization();
-          setLoading(false);
+          setAuthLoading(false);
+          
+          // Check if authentication was successful and store token
+          await checkAuthenticationStatus();
         }
       }, 1000);
       
     } catch (error) {
-      setError("Failed to start OAuth authorization");
-      setLoading(false);
+      console.error('OAuth flow failed:', error);
+      setError(`OAuth failed: ${error.message}`);
+      setAuthLoading(false);
     }
   };
 
-  const getSiteData = async () => {
+  // Handle OAuth callback and store access token
+  // Following Webflow Hybrid App guidelines
+  const handleOAuthCallback = async (accessToken, siteId, siteShortName) => {
+    try {
+      if (accessToken && siteId) {
+        // Store the OAuth access token locally following Webflow best practices
+        const tokenData = {
+          accessToken: accessToken,
+          timestamp: Date.now(),
+          siteId: siteId,
+          siteShortName: siteShortName
+        };
+        localStorage.setItem('seo-helper-oauth-token', JSON.stringify(tokenData));
+        
+        // Set the token in axios headers for API calls
+        api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+        
+        // Update site information if needed
+        if (selectedSite && selectedSite.id !== siteId) {
+          setSelectedSite({
+            id: siteId,
+            displayName: siteShortName || siteId
+          });
+        }
+        
+        // Now check authentication status with the stored token
+        await checkAuthenticationStatus();
+        
+        setSuccessMessage('Successfully connected to Webflow!');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      }
+    } catch (error) {
+      console.error('Failed to handle OAuth callback:', error);
+      setError('Failed to complete authentication');
+    }
+  };
+
+  const refreshData = async () => {
     try {
       setError("");
       setSuccessMessage("");
       
-      if (typeof webflow !== 'undefined') {
-        const info = await webflow.getSiteInfo();
-        const siteId = info.siteId;
-        const displayName = info?.siteName || info?.displayName || info?.shortName || siteId;
-        const site = { id: siteId, displayName };
-        setSelectedSite(site);
-        
-        if (isAuthorized) {
-          await getPages();
-        }
+      if (isAuthenticated) {
+        // User is authenticated, just refresh pages
+        await checkAuthenticationStatus();
       } else {
-        // Development mode - refresh demo data
-        setSuccessMessage("Demo mode - data refreshed!");
-        setTimeout(() => setSuccessMessage(""), 2000);
+        // User needs to authenticate
+        await startOAuthFlow();
       }
     } catch (e) {
-      setError(e?.message || "Failed to reload site info");
+      setError(`Failed to refresh: ${e.message}`);
     }
   };
 
-  const getPages = async () => {
+  const logout = async () => {
     try {
-      setLoading(true);
-      setError("");
+      // Clear stored OAuth token
+      localStorage.removeItem('seo-helper-oauth-token');
       
-      if (typeof webflow !== 'undefined' && backendUrl && isAuthorized) {
-        // Use Express backend to get pages
-        const response = await axios.get(`${backendUrl}/pages`, {
-          withCredentials: true,
-          timeout: 10000
-        });
-        
-        const pagesData = response.data.pages || [];
-        setPages(pagesData);
-      } else {
-        // Development mode - use demo data
-        setPages([
-          { id: "1", title: "Home", slug: "home", seo: { title: "Welcome to Our Site", description: "The best website ever" } },
-          { id: "2", title: "About", slug: "about", seo: { title: "About Us", description: "" } },
-          { id: "3", title: "Contact", slug: "contact", seo: { title: "", description: "Get in touch with us" } },
-          { id: "4", title: "Services", slug: "services", seo: { title: "", description: "" } }
-        ]);
-      }
+      // Clear backend session
+      await api.post('/logout');
       
+      // Reset state
+      setIsAuthenticated(false);
+      setPages([]);
       setEditingPage(null);
       setSeoTitle("");
       setSeoDescription("");
       
-      // Show success message briefly
-      setSuccessMessage("Pages loaded successfully!");
-      setTimeout(() => setSuccessMessage(""), 2000);
+      // Clear authorization header
+      delete api.defaults.headers.common['Authorization'];
       
-    } catch (e) {
-      if (e.response?.status === 401) {
-        setIsAuthorized(false);
-        setError("Please re-authorize the app to continue");
-      } else {
-        setError(e?.response?.data?.message || e?.message || "Failed to load pages");
-      }
-    } finally {
-      setLoading(false);
+      setSuccessMessage("Logged out successfully");
+      setTimeout(() => setSuccessMessage(""), 3000);
+    } catch (error) {
+      console.error('Logout failed:', error);
+      // Still clear local state even if backend logout fails
+      setIsAuthenticated(false);
+      setPages([]);
+      delete api.defaults.headers.common['Authorization'];
     }
   };
 
@@ -235,33 +370,22 @@ const App = () => {
   };
 
   const saveSeo = async () => {
-    if (!editingPage || !selectedSite) return;
+    if (!editingPage) return;
     
     try {
       setSaving(true);
       setError("");
       
-      if (typeof webflow !== 'undefined' && backendUrl && isAuthorized) {
-        // Use Express backend to update page SEO
-        await axios.patch(`${backendUrl}/pages/${editingPage.id}`, {
-          seo: {
-            title: seoTitle || "",
-            description: seoDescription || ""
-          }
-        }, {
-          withCredentials: true,
-          timeout: 10000
-        });
-        
-        // Refresh pages to get updated data
-        await getPages();
-      } else {
-        // Development mode - simulate update
-        setTimeout(() => {
-          setSuccessMessage("SEO updated successfully! (Demo mode)");
-          setTimeout(() => setSuccessMessage(""), 3000);
-        }, 1000);
-      }
+      // Update page SEO via backend API
+      await api.patch(`/pages/${editingPage.id}`, {
+        seo: {
+          title: seoTitle || "",
+          description: seoDescription || ""
+        }
+      });
+      
+      // Refresh pages to get updated data
+      await checkAuthenticationStatus();
       
       setEditingPage(null);
       setSuccessMessage("SEO updated successfully!");
@@ -269,10 +393,10 @@ const App = () => {
       
     } catch (e) {
       if (e.response?.status === 401) {
-        setIsAuthorized(false);
-        setError("Please re-authorize the app to continue");
+        setIsAuthenticated(false);
+        setError("Authentication expired. Please re-authorize.");
       } else {
-        setError(e?.response?.data?.message || e?.message || "Failed to save SEO");
+        setError(`Failed to save SEO: ${e.response?.data?.message || e.message}`);
       }
     } finally {
       setSaving(false);
@@ -325,7 +449,7 @@ const App = () => {
         p: 2
       }}>
         <Container maxWidth={false} sx={{ p: 0 }}>
-          {/* Header with gradient background */}
+          {/* Header */}
           <Box sx={{ 
             background: "rgba(255,255,255,0.95)", 
             backdropFilter: "blur(10px)",
@@ -349,18 +473,33 @@ const App = () => {
                     sx={{ background: "rgba(102, 126, 234, 0.1)", color: "#667eea" }}
                   />
                 )}
-                <Tooltip title="Refresh data">
-                  <IconButton 
-                    onClick={getSiteData} 
-                    disabled={loading}
-                    sx={{ 
-                      background: "rgba(102, 126, 234, 0.1)",
-                      "&:hover": { background: "rgba(102, 126, 234, 0.2)" }
-                    }}
-                  >
-                    <RefreshIcon />
-                  </IconButton>
-                </Tooltip>
+                                 <Tooltip title="Refresh data">
+                   <IconButton 
+                     onClick={refreshData} 
+                     disabled={loading || authLoading}
+                     sx={{ 
+                       background: "rgba(102, 126, 234, 0.1)",
+                       "&:hover": { background: "rgba(102, 126, 234, 0.2)" }
+                     }}
+                   >
+                     <RefreshIcon />
+                   </IconButton>
+                 </Tooltip>
+                 
+                 {isAuthenticated && (
+                   <Tooltip title="Logout">
+                     <IconButton 
+                       onClick={logout}
+                       sx={{ 
+                         background: "rgba(231, 76, 60, 0.1)",
+                         color: "#e74c3c",
+                         "&:hover": { background: "rgba(231, 76, 60, 0.2)" }
+                       }}
+                     >
+                       <InfoIcon />
+                     </IconButton>
+                   </Tooltip>
+                 )}
               </Stack>
             </Stack>
           </Box>
@@ -379,8 +518,8 @@ const App = () => {
             </Alert>
           )}
 
-          {/* Authorization Required */}
-          {!isAuthorized && typeof webflow !== 'undefined' && (
+          {/* Authentication Required */}
+          {!isAuthenticated && (
             <Card sx={{ 
               borderRadius: 2, 
               background: "rgba(255,255,255,0.95)",
@@ -390,16 +529,16 @@ const App = () => {
             }}>
               <CardContent sx={{ p: 2 }}>
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: "#2c3e50" }}>
-                  🔐 Authorization Required
+                  🔐 Connect to Webflow
                 </Typography>
                 <Typography variant="body2" sx={{ mb: 2, color: "#666" }}>
-                  To access your pages and update SEO, you need to authorize the app with your Webflow account.
+                  To access and edit your page SEO, you need to authorize this app with your Webflow account.
                 </Typography>
                 
                 <Button 
                   variant="contained" 
-                  onClick={startOAuth}
-                  disabled={loading}
+                  onClick={startOAuthFlow}
+                  disabled={authLoading}
                   sx={{ 
                     borderRadius: 2,
                     background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
@@ -408,14 +547,14 @@ const App = () => {
                     }
                   }}
                 >
-                  {loading ? "Authorizing..." : "🔐 Authorize with Webflow"}
+                  {authLoading ? "Connecting..." : "🔐 Connect with Webflow"}
                 </Button>
               </CardContent>
             </Card>
           )}
 
-          {/* Main Content Grid */}
-          {isAuthorized && (
+          {/* Main Content - Only show when authenticated */}
+          {isAuthenticated && (
             <Grid container spacing={1}>
               {/* SEO Analytics Dashboard */}
               {seoAnalytics && (

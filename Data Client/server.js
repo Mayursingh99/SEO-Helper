@@ -134,10 +134,11 @@ app.get('/auth', (req, res) => {
 
   const state = Math.random().toString(36).substring(7);
   
-  // Use official WebflowClient.authorizeURL as per documentation
+  // Use official WebflowClient.authorizeURL as per Webflow documentation
+  // Reference: https://developers.webflow.com/data/docs/getting-started-apps
   const authorizeUrl = WebflowClient.authorizeURL({
     state: state,
-    scope: 'sites:read sites:write',  // Add necessary scopes as per Webflow docs
+    scope: 'authorized_user:read sites:read sites:write pages:read pages:write',
     clientId: OAUTH_CLIENT_ID,
     redirectUri: OAUTH_REDIRECT_URI,
   });
@@ -145,7 +146,7 @@ app.get('/auth', (req, res) => {
   console.log('OAuth authorization URL generated using official WebflowClient:', {
     client_id: OAUTH_CLIENT_ID,
     redirect_uri: OAUTH_REDIRECT_URI,
-    scope: 'sites:read sites:write',
+    scope: 'authorized_user:read sites:read sites:write pages:read pages:write',
     full_url: authorizeUrl,
     method: 'WebflowClient.authorizeURL'
   });
@@ -153,7 +154,7 @@ app.get('/auth', (req, res) => {
   res.json({ 
     authorizeUrl: authorizeUrl,
     message: 'OAuth authorization URL generated using official Webflow approach',
-    scope: 'sites:read sites:write'
+    scope: 'authorized_user:read sites:read sites:write pages:read pages:write'
   });
 });
 
@@ -260,16 +261,22 @@ app.get('/callback', async (req, res) => {
     }
 
     // Exchange code for access token using official Webflow approach
+    // Reference: https://developers.webflow.com/data/docs/getting-started-apps
     const accessToken = await WebflowClient.getAccessToken({
       clientId: OAUTH_CLIENT_ID,
       clientSecret: OAUTH_CLIENT_SECRET,
       code: code,
-      redirect_uri: OAUTH_REDIRECT_URI,
+      redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI), // Must match exactly
     });
+
+    if (!accessToken) {
+      throw new Error('Failed to obtain access token from Webflow');
+    }
 
     console.log('Access token received using official WebflowClient:', {
       method: 'WebflowClient.getAccessToken',
-      success: !!accessToken
+      success: !!accessToken,
+      tokenLength: accessToken.length
     });
 
     // For Hybrid Apps: Get user info using official Webflow Data API v2
