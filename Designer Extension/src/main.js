@@ -96,45 +96,49 @@ const App = () => {
           
           setSelectedSite(site);
           
-          // Check if user is already authenticated (local storage + backend check)
+                    // Check if user is already authenticated (local storage + backend check)
           // First check if they're authorized for this site
           const isAuthorized = await isUserAuthorizedForSite();
           if (isAuthorized) {
             await checkPersistentAuthentication();
           } else {
-                      // Check if this is an installed app that should auto-authorize
-          const isInstalled = await isAppInstalled();
-          if (isInstalled) {
-            console.log('App is installed and authorized!');
-            // Store this as an installed app
-            const siteInfo = await webflow.getSiteInfo();
-            const authData = {
-              accessToken: 'webflow-installed-auth',
-              timestamp: Date.now(),
-              siteId: siteInfo.siteId,
-              siteShortName: siteInfo.shortName || siteInfo.siteName,
-              isInstalledApp: true
-            };
-            localStorage.setItem('seo-helper-oauth-token', JSON.stringify(authData));
+            // Check if this is an installed app that should auto-authorize
+            console.log('Checking if app is installed and authorized...');
+            const isInstalled = await isAppInstalled();
             
-            // Get pages data for installed app
-            try {
-              const pagesResponse = await api.get('/pages');
-              setPages(pagesResponse.data.pages || []);
-            } catch (error) {
-              console.log('Failed to get pages for installed app:', error.message);
+            if (isInstalled) {
+              console.log('App is installed and authorized!');
+              // Store this as an installed app
+              const siteInfo = await webflow.getSiteInfo();
+              const authData = {
+                accessToken: 'webflow-installed-auth',
+                timestamp: Date.now(),
+                siteId: siteInfo.siteId,
+                siteShortName: siteInfo.shortName || siteInfo.siteName,
+                isInstalledApp: true
+              };
+              localStorage.setItem('seo-helper-oauth-token', JSON.stringify(authData));
+              
+              // Get pages data for installed app
+              try {
+                const pagesResponse = await api.get('/pages');
+                setPages(pagesResponse.data.pages || []);
+                console.log('Pages loaded for installed app:', pagesResponse.data.pages.length);
+              } catch (error) {
+                console.log('Failed to get pages for installed app:', error.message);
+                setPages([]);
+              }
+              
+              // Set authenticated state
+              setIsAuthenticated(true);
+              setSuccessMessage("App authorized! Your pages are loaded.");
+              setTimeout(() => setSuccessMessage(""), 3000);
+            } else {
+              console.log('App not installed or authorized - showing connect button');
+              // User needs to authorize for this site
+              setIsAuthenticated(false);
               setPages([]);
             }
-            
-            // Set authenticated state
-            setIsAuthenticated(true);
-            setSuccessMessage("App authorized! Your pages are loaded.");
-            setTimeout(() => setSuccessMessage(""), 3000);
-          } else {
-            // User needs to authorize for this site
-            setIsAuthenticated(false);
-            setPages([]);
-          }
           }
         } catch (e) {
           console.error('Initialization error:', e);
@@ -176,14 +180,56 @@ const App = () => {
   }, []);
 
   // Check if app is running in installed context (marketplace installation)
+  // Following Webflow Designer Extension guidelines for automatic authorization
   const isAppInstalled = async () => {
     try {
       if (typeof webflow === 'undefined') return false;
       
-      // Try to access the API directly - if it works, the app is installed
-      const response = await api.get('/pages');
-      return response.data.pages && response.data.pages.length > 0;
+      // For Designer Extensions, we need to check if we're in an authorized context
+      // This happens when the app is installed from the marketplace
+      const siteInfo = await webflow.getSiteInfo();
+      console.log('Checking if app is installed for site:', siteInfo.siteId);
+      
+      // First, check if we can access site info - this indicates basic authorization
+      if (siteInfo && siteInfo.siteId) {
+        console.log('Basic site access confirmed');
+        
+        // Now try to access the API with Webflow's built-in authorization
+        // If this works, the app is already authorized
+        try {
+          const response = await api.get('/pages');
+          if (response.data.pages && response.data.pages.length > 0) {
+            console.log('App is installed and authorized! Pages found:', response.data.pages.length);
+            return true;
+          }
+        } catch (error) {
+          if (error.response?.status === 401) {
+            console.log('App not authorized - 401 error');
+            return false;
+          }
+          console.log('API call failed:', error.message);
+          
+          // Fallback: Try to use Webflow's Designer Extension API directly
+          // This might work if the app is installed but backend is having issues
+          try {
+            console.log('Trying Webflow Designer Extension API fallback...');
+            // Note: webflow.getPages() doesn't exist, but we can check other Designer APIs
+            const currentPage = await webflow.getCurrentPage();
+            if (currentPage) {
+              console.log('Designer Extension API access confirmed via current page');
+              return true; // If we can access Designer APIs, the app is installed
+            }
+          } catch (designerError) {
+            console.log('Designer Extension API fallback failed:', designerError.message);
+          }
+          
+          return false;
+        }
+      }
+      
+      return false;
     } catch (error) {
+      console.error('Failed to check if app is installed:', error);
       return false;
     }
   };
