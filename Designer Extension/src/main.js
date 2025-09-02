@@ -102,9 +102,39 @@ const App = () => {
           if (isAuthorized) {
             await checkPersistentAuthentication();
           } else {
+                      // Check if this is an installed app that should auto-authorize
+          const isInstalled = await isAppInstalled();
+          if (isInstalled) {
+            console.log('App is installed and authorized!');
+            // Store this as an installed app
+            const siteInfo = await webflow.getSiteInfo();
+            const authData = {
+              accessToken: 'webflow-installed-auth',
+              timestamp: Date.now(),
+              siteId: siteInfo.siteId,
+              siteShortName: siteInfo.shortName || siteInfo.siteName,
+              isInstalledApp: true
+            };
+            localStorage.setItem('seo-helper-oauth-token', JSON.stringify(authData));
+            
+            // Get pages data for installed app
+            try {
+              const pagesResponse = await api.get('/pages');
+              setPages(pagesResponse.data.pages || []);
+            } catch (error) {
+              console.log('Failed to get pages for installed app:', error.message);
+              setPages([]);
+            }
+            
+            // Set authenticated state
+            setIsAuthenticated(true);
+            setSuccessMessage("App authorized! Your pages are loaded.");
+            setTimeout(() => setSuccessMessage(""), 3000);
+          } else {
             // User needs to authorize for this site
             setIsAuthenticated(false);
             setPages([]);
+          }
           }
         } catch (e) {
           console.error('Initialization error:', e);
@@ -145,18 +175,65 @@ const App = () => {
     };
   }, []);
 
+  // Check if app is running in installed context (marketplace installation)
+  const isAppInstalled = async () => {
+    try {
+      if (typeof webflow === 'undefined') return false;
+      
+      // Try to access the API directly - if it works, the app is installed
+      const response = await api.get('/pages');
+      return response.data.pages && response.data.pages.length > 0;
+    } catch (error) {
+      return false;
+    }
+  };
+
   // Check if user is already authorized for current site
+  // Following Webflow Designer Extension guidelines for automatic authorization detection
   const isUserAuthorizedForSite = async () => {
     try {
       if (typeof webflow === 'undefined') return false;
       
       const siteInfo = await webflow.getSiteInfo();
-      const storedToken = localStorage.getItem('seo-helper-oauth-token');
+      console.log('Current site info:', siteInfo);
       
+      // First check if we have a stored token for this site
+      const storedToken = localStorage.getItem('seo-helper-oauth-token');
       if (storedToken) {
         const tokenData = JSON.parse(storedToken);
         // Check if stored token is for the current site
-        return tokenData.siteId === siteInfo.siteId;
+        if (tokenData.siteId === siteInfo.siteId) {
+          console.log('Found stored token for current site');
+          return true;
+        }
+      }
+      
+      // If no stored token, check if the app is already authorized via Webflow's system
+      // This happens when user installs the app and grants permissions
+      try {
+        // Try to make a direct API call to see if we're authorized
+        const response = await api.get('/pages');
+        if (response.data.pages) {
+          console.log('App is already authorized for this site');
+          // Store the authorization info for future use
+          const authData = {
+            accessToken: 'webflow-installed-auth', // Special marker for installed app
+            timestamp: Date.now(),
+            siteId: siteInfo.siteId,
+            siteShortName: siteInfo.shortName || siteInfo.siteName,
+            isInstalledApp: true
+          };
+          localStorage.setItem('seo-helper-oauth-token', JSON.stringify(authData));
+          return true;
+        }
+      } catch (error) {
+        if (error.response?.status === 401) {
+          console.log('App not authorized for this site');
+          return false;
+        }
+        // Other errors, assume not authorized
+        console.log('Error checking authorization:', error.message);
+        return false;
       }
       
       return false;
@@ -187,7 +264,26 @@ const App = () => {
         try {
           const tokenData = JSON.parse(storedToken);
           
-          // Set the token in axios headers for this request
+          // Check if this is an installed app (no OAuth token needed)
+          if (tokenData.isInstalledApp) {
+            console.log('Using installed app authorization');
+            // For installed apps, we can directly access the API
+            try {
+              const response = await api.get('/pages');
+              if (response.data.pages) {
+                setIsAuthenticated(true);
+                setPages(response.data.pages);
+                setSuccessMessage("App authorized! Your pages are loaded.");
+                setTimeout(() => setSuccessMessage(""), 3000);
+                return;
+              }
+            } catch (error) {
+              console.log('Installed app API call failed:', error.message);
+              // Fall through to regular token validation
+            }
+          }
+          
+          // Regular OAuth token validation
           const tempApi = axios.create({
             baseURL: BACKEND_URL,
             timeout: 10000,
@@ -609,7 +705,7 @@ const App = () => {
                 </Typography>
                                  <Typography variant="body2" sx={{ mb: 2, color: "#666" }}>
                    To access and edit your page SEO for this site, you need to authorize this app with your Webflow account. 
-                   This is a one-time process per site.
+                   If you've already installed this app from the marketplace, it should authorize automatically.
                  </Typography>
                 
                 <Button 
