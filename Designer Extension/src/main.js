@@ -91,25 +91,25 @@ const App = () => {
           
           setSelectedSite(site);
           
-          // Check if we have a stored session token
-          const storedSessionToken = localStorage.getItem('seo-helper-session-token');
-          if (storedSessionToken) {
+          // Check if we have a stored OAuth token
+          const storedToken = localStorage.getItem('seo-helper-oauth-token');
+          if (storedToken) {
             try {
-              const sessionData = JSON.parse(storedSessionToken);
-              // Check if session is for current site
-              if (sessionData.siteId === siteId) {
-                // Set session token in headers
-                api.defaults.headers.common['Authorization'] = `Bearer ${sessionData.sessionToken}`;
+              const tokenData = JSON.parse(storedToken);
+              // Check if token is for current site
+              if (tokenData.siteId === siteId) {
+                // Set token in headers
+                api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.accessToken}`;
                 // Try to load pages
                 await loadPages();
               } else {
-                // Session is for different site, clear it
-                localStorage.removeItem('seo-helper-session-token');
+                // Token is for different site, clear it
+                localStorage.removeItem('seo-helper-oauth-token');
                 setIsAuthenticated(false);
               }
             } catch (error) {
-              console.error('Failed to parse stored session token:', error);
-              localStorage.removeItem('seo-helper-session-token');
+              console.error('Failed to parse stored token:', error);
+              localStorage.removeItem('seo-helper-oauth-token');
               setIsAuthenticated(false);
             }
           } else {
@@ -125,6 +125,28 @@ const App = () => {
     } else {
       setError("This app must be run within the Webflow Designer");
     }
+
+    // Add message listener for OAuth callbacks
+    const handleMessage = (event) => {
+      // Only accept messages from our backend domain
+      if (event.origin !== BACKEND_URL.replace('https://', '').replace('http://', '')) {
+        return;
+      }
+
+      if (event.data.type === 'OAUTH_SUCCESS') {
+        const { accessToken, siteId, siteShortName } = event.data;
+        handleOAuthSuccess(accessToken, siteId, siteShortName);
+      } else if (event.data.type === 'OAUTH_ERROR') {
+        setError(`OAuth failed: ${event.data.error}`);
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Cleanup
+    return () => {
+      window.removeEventListener('message', handleMessage);
+    };
   }, []);
 
   // Load pages from backend
@@ -167,58 +189,85 @@ const App = () => {
     }
   };
 
-  // Start ID Token authentication flow as per Webflow documentation
-  const startIdTokenAuth = async () => {
+  // Start OAuth 2.0 authentication flow as per Webflow documentation
+  // Reference: https://developers.webflow.com/data/reference/oauth-app
+  const startOAuth = async () => {
     try {
       setAuthLoading(true);
       setError("");
       
-      // Get ID token from Webflow Designer Extension API
-      const idToken = await webflow.getIdToken();
+      // Open OAuth popup to redirect to Webflow authorization
+      const popup = window.open(
+        `${BACKEND_URL}/auth`,
+        'webflow-oauth',
+        'width=600,height=700,scrollbars=yes,resizable=yes,location=yes'
+      );
       
-      if (!idToken) {
-        throw new Error('Failed to get ID token from Webflow');
+      if (!popup) {
+        throw new Error('Popup blocked. Please allow popups for this site.');
       }
       
-      // Get site info
-      const siteInfo = await webflow.getSiteInfo();
-      const siteId = siteInfo.siteId;
+      // Store popup reference
+      window.webflowOAuthPopup = popup;
       
-      // Send ID token to Data Client for verification and session creation
-      const response = await api.post('/auth/id-token', {
-        idToken: idToken,
-        siteId: siteId
-      });
-      
-      if (response.data.success && response.data.sessionToken) {
-        // Store session token
-        const sessionData = {
-          sessionToken: response.data.sessionToken,
-          siteId: siteId,
-          timestamp: Date.now()
-        };
-        localStorage.setItem('seo-helper-session-token', JSON.stringify(sessionData));
-        
-        // Set session token in headers
-        api.defaults.headers.common['Authorization'] = `Bearer ${response.data.sessionToken}`;
-        
-        // Load pages
-        await loadPages();
-        
-        setSuccessMessage('Successfully authenticated with Webflow!');
-        setTimeout(() => setSuccessMessage(''), 3000);
-      } else {
-        throw new Error('Failed to create session with Data Client');
-      }
+      // Check for popup closure
+      const checkClosed = setInterval(() => {
+        if (popup.closed) {
+          clearInterval(checkClosed);
+          window.webflowOAuthPopup = null;
+          
+          // Try to load pages after popup closes
+          setTimeout(() => {
+            if (!isAuthenticated) {
+              loadPages();
+            }
+          }, 1000);
+        }
+      }, 1000);
       
     } catch (error) {
-      console.error('ID Token authentication failed:', error);
-      setError(`Authentication failed: ${error.message}`);
+      console.error('OAuth failed:', error);
+      setError(`OAuth failed: ${error.message}`);
     } finally {
       setAuthLoading(false);
     }
   };
 
+
+  // Handle OAuth success
+  const handleOAuthSuccess = async (accessToken, siteId, siteShortName) => {
+    try {
+      // Store the token
+      const tokenData = {
+        accessToken: accessToken,
+        timestamp: Date.now(),
+        siteId: siteId,
+        siteShortName: siteShortName
+      };
+      localStorage.setItem('seo-helper-oauth-token', JSON.stringify(tokenData));
+      
+      // Set token in headers
+      api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+      
+      // Update site info if needed
+      if (selectedSite && selectedSite.id !== siteId) {
+        setSelectedSite({
+          id: siteId,
+          displayName: siteShortName || siteId
+        });
+      }
+      
+      // Load pages
+      await loadPages();
+      
+      setSuccessMessage('Successfully connected to Webflow!');
+      setTimeout(() => setSuccessMessage(''), 3000);
+      
+    } catch (error) {
+      console.error('Failed to handle OAuth success:', error);
+      setError('Failed to complete authentication');
+    }
+  };
 
   // Refresh data
   const refreshData = async () => {
@@ -229,7 +278,7 @@ const App = () => {
       if (isAuthenticated) {
         await loadPages();
       } else {
-        await startIdTokenAuth();
+        await startOAuth();
       }
     } catch (e) {
       setError(`Failed to refresh: ${e.message}`);
@@ -239,8 +288,8 @@ const App = () => {
   // Logout
   const logout = async () => {
     try {
-      // Clear stored session token
-      localStorage.removeItem('seo-helper-session-token');
+      // Clear stored OAuth token
+      localStorage.removeItem('seo-helper-oauth-token');
       
       // Clear backend session
       await api.post('/logout');
@@ -436,7 +485,7 @@ const App = () => {
                 
                 <Button 
                   variant="contained" 
-                  onClick={startIdTokenAuth}
+                  onClick={startOAuth}
                   disabled={authLoading}
                   sx={{ 
                     borderRadius: 2,
@@ -446,7 +495,7 @@ const App = () => {
                     }
                   }}
                 >
-                  {authLoading ? "Authenticating..." : "🔐 Authenticate with Webflow"}
+                  {authLoading ? "Connecting..." : "🔐 Connect with Webflow"}
                 </Button>
               </CardContent>
             </Card>

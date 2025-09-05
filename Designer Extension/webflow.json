@@ -3,12 +3,15 @@
   "publicDir": "public",
   "apiVersion": "2",
   "size": "large",
-  "description": "Professional SEO management tool for Webflow sites with secure ID token authentication",
+  "description": "Professional SEO management tool for Webflow sites with OAuth 2.0 authentication",
   "version": "1.0.0",
   "author": "SEO Helper Team",
   "category": "SEO & Analytics",
   "permissions": [
     "sites:read",
+    "sites:write",
+    "pages:read",
+    "pages:write",
     "authorized_user:read"
   ]
 }

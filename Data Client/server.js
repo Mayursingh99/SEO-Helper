@@ -278,7 +278,8 @@ app.post('/auth/id-token', async (req, res) => {
   }
 });
 
-// OAuth Authorization endpoint using official Webflow approach
+// OAuth Authorization endpoint using official Webflow OAuth 2.0 flow
+// Reference: https://developers.webflow.com/data/reference/oauth-app
 app.get('/auth', (req, res) => {
   if (!OAUTH_CLIENT_ID || !OAUTH_REDIRECT_URI) {
     return res.status(500).json({ 
@@ -290,10 +291,10 @@ app.get('/auth', (req, res) => {
   const state = Math.random().toString(36).substring(7);
   
   // Use official WebflowClient.authorizeURL as per Webflow documentation
-  // Reference: https://developers.webflow.com/data/docs/getting-started-apps
+  // Reference: https://developers.webflow.com/data/reference/oauth-app
   const authorizeUrl = WebflowClient.authorizeURL({
     state: state,
-    scope: 'authorized_user:read sites:read sites:write pages:read pages:write',
+    scope: 'sites:read sites:write pages:read pages:write authorized_user:read',
     clientId: OAUTH_CLIENT_ID,
     redirectUri: OAUTH_REDIRECT_URI,
   });
@@ -301,16 +302,13 @@ app.get('/auth', (req, res) => {
   console.log('OAuth authorization URL generated using official WebflowClient:', {
     client_id: OAUTH_CLIENT_ID,
     redirect_uri: OAUTH_REDIRECT_URI,
-    scope: 'authorized_user:read sites:read sites:write pages:read pages:write',
+    scope: 'sites:read sites:write pages:read pages:write authorized_user:read',
     full_url: authorizeUrl,
     method: 'WebflowClient.authorizeURL'
   });
   
-  res.json({ 
-    authorizeUrl: authorizeUrl,
-    message: 'OAuth authorization URL generated using official Webflow approach',
-    scope: 'authorized_user:read sites:read sites:write pages:read pages:write'
-  });
+  // Redirect to Webflow authorization screen as per OAuth 2.0 specification
+  res.redirect(authorizeUrl);
 });
 
 // OAuth Callback endpoint
@@ -415,13 +413,13 @@ app.get('/callback', async (req, res) => {
       return res.send(errorHtml);
     }
 
-    // Exchange code for access token using official Webflow approach
-    // Reference: https://developers.webflow.com/data/docs/getting-started-apps
+    // Exchange code for access token using official Webflow OAuth 2.0 approach
+    // Reference: https://developers.webflow.com/data/reference/oauth-app
     const accessToken = await WebflowClient.getAccessToken({
       clientId: OAUTH_CLIENT_ID,
       clientSecret: OAUTH_CLIENT_SECRET,
       code: code,
-      redirect_uri: encodeURIComponent(OAUTH_REDIRECT_URI), // Must match exactly
+      redirectUri: OAUTH_REDIRECT_URI, // Must match exactly
     });
 
     if (!accessToken) {
@@ -601,35 +599,21 @@ app.get('/deep-link', async (req, res) => {
 // Get pages endpoint
 app.get('/pages', async (req, res) => {
   try {
-    // Check for session token in Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Please authenticate first',
-        authEndpoint: '/auth/id-token'
-      });
-    }
-
-    const sessionToken = authHeader.substring(7);
-    const sessionData = verifySessionToken(sessionToken);
-    
-    if (!sessionData) {
-      return res.status(401).json({ 
-        error: 'Invalid session',
-        message: 'Session token is invalid or expired',
-        authEndpoint: '/auth/id-token'
-      });
-    }
-
-    const { userId, siteId } = sessionData;
-    const accessToken = req.session?.accessToken;
+    const accessToken = getUserToken(req);
+    const siteId = req.session.siteId;
 
     if (!accessToken) {
       return res.status(401).json({ 
-        error: 'No access token',
-        message: 'Please re-authenticate',
-        authEndpoint: '/auth/id-token'
+        error: 'Unauthorized',
+        message: 'Please authorize the app first',
+        authorizeUrl: '/auth'
+      });
+    }
+
+    if (!siteId) {
+      return res.status(400).json({ 
+        error: 'No site ID found',
+        message: 'Please complete OAuth authorization first'
       });
     }
 
@@ -696,36 +680,13 @@ app.patch('/pages/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { seo } = req.body;
-    
-    // Check for session token in Authorization header
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Please authenticate first',
-        authEndpoint: '/auth/id-token'
-      });
-    }
-
-    const sessionToken = authHeader.substring(7);
-    const sessionData = verifySessionToken(sessionToken);
-    
-    if (!sessionData) {
-      return res.status(401).json({ 
-        error: 'Invalid session',
-        message: 'Session token is invalid or expired',
-        authEndpoint: '/auth/id-token'
-      });
-    }
-
-    const { userId, siteId } = sessionData;
-    const accessToken = req.session?.accessToken;
+    const accessToken = getUserToken(req);
 
     if (!accessToken) {
       return res.status(401).json({ 
-        error: 'No access token',
-        message: 'Please re-authenticate',
-        authEndpoint: '/auth/id-token'
+        error: 'Unauthorized',
+        message: 'Please authorize the app first',
+        authorizeUrl: '/auth'
       });
     }
 
@@ -886,18 +847,6 @@ app.get('/site', async (req, res) => {
 
 // Logout endpoint
 app.post('/logout', (req, res) => {
-  // Check for session token in Authorization header
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const sessionToken = authHeader.substring(7);
-    const sessionData = verifySessionToken(sessionToken);
-    
-    if (sessionData) {
-      // Remove session from active sessions
-      activeSessions.delete(sessionData.sessionId);
-    }
-  }
-  
   clearUserSession(req);
   res.json({ 
     success: true,
