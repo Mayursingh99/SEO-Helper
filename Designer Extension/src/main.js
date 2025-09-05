@@ -115,7 +115,6 @@ const App = () => {
           } else {
             // No stored token, user needs to authenticate
             setIsAuthenticated(false);
-            console.log('No stored OAuth token found. User needs to authenticate.');
           }
         } catch (e) {
           console.error('Initialization error:', e);
@@ -132,14 +131,10 @@ const App = () => {
     const handleMessage = (event) => {
       // Only accept messages from our backend domain
       const allowedOrigin = BACKEND_URL.replace('https://', '').replace('http://', '');
-      console.log('Message received from origin:', event.origin, 'Expected:', allowedOrigin);
       
       if (event.origin !== allowedOrigin) {
-        console.log('Message origin mismatch, ignoring');
         return;
       }
-
-      console.log('OAuth message received:', event.data);
 
       if (event.data.type === 'OAUTH_SUCCESS') {
         const { accessToken, siteId, siteShortName } = event.data;
@@ -163,15 +158,7 @@ const App = () => {
       setLoading(true);
       setError("");
       
-      // Get current site info
-      const siteInfo = await webflow.getSiteInfo();
-      const siteId = siteInfo.siteId;
-      
-      const response = await api.get('/pages', {
-        headers: {
-          'X-Site-ID': siteId
-        }
-      });
+      const response = await api.get('/pages');
       
       if (response.data && response.data.pages) {
         setPages(response.data.pages);
@@ -250,36 +237,38 @@ const App = () => {
   // Handle OAuth success
   const handleOAuthSuccess = async (accessToken, siteId, siteShortName) => {
     try {
-      console.log('OAuth success received:', { accessToken: accessToken ? 'present' : 'missing', siteId, siteShortName });
-      
-      // Store the token
-      const tokenData = {
+      // First, verify the token with the server
+      const verifyResponse = await api.post('/auth/verify-token', {
         accessToken: accessToken,
-        timestamp: Date.now(),
-        siteId: siteId,
-        siteShortName: siteShortName
-      };
-      localStorage.setItem('seo-helper-oauth-token', JSON.stringify(tokenData));
-      console.log('OAuth token stored in localStorage');
+        siteId: siteId
+      });
       
-      // Set token in headers
-      api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
-      console.log('Authorization header set');
-      
-      // Update site info if needed
-      if (selectedSite && selectedSite.id !== siteId) {
-        setSelectedSite({
-          id: siteId,
-          displayName: siteShortName || siteId
-        });
+      if (verifyResponse.data.success) {
+        // Store the token locally
+        const tokenData = {
+          accessToken: accessToken,
+          timestamp: Date.now(),
+          siteId: siteId,
+          siteShortName: siteShortName
+        };
+        localStorage.setItem('seo-helper-oauth-token', JSON.stringify(tokenData));
+        
+        // Update site info if needed
+        if (selectedSite && selectedSite.id !== siteId) {
+          setSelectedSite({
+            id: siteId,
+            displayName: siteShortName || siteId
+          });
+        }
+        
+        // Load pages
+        await loadPages();
+        
+        setSuccessMessage('Successfully connected to Webflow!');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      } else {
+        throw new Error('Token verification failed');
       }
-      
-      // Load pages
-      console.log('Attempting to load pages...');
-      await loadPages();
-      
-      setSuccessMessage('Successfully connected to Webflow!');
-      setTimeout(() => setSuccessMessage(''), 3000);
       
     } catch (error) {
       console.error('Failed to handle OAuth success:', error);
@@ -350,19 +339,11 @@ const App = () => {
       setSaving(true);
       setError("");
       
-      // Get current site info
-      const siteInfo = await webflow.getSiteInfo();
-      const siteId = siteInfo.siteId;
-      
       // Update page SEO via backend API
       await api.patch(`/pages/${editingPage.id}`, {
         seo: {
           title: seoTitle || "",
           description: seoDescription || ""
-        }
-      }, {
-        headers: {
-          'X-Site-ID': siteId
         }
       });
       

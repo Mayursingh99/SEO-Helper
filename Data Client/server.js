@@ -185,24 +185,23 @@ app.get('/session', (req, res) => {
   res.json(sessionInfo);
 });
 
-// ID Token verification endpoint as per Webflow documentation
-app.post('/auth/id-token', async (req, res) => {
+// Token verification endpoint for Designer Extension
+app.post('/auth/verify-token', async (req, res) => {
   try {
-    const { idToken, siteId } = req.body;
+    const { accessToken, siteId } = req.body;
 
-    if (!idToken || !siteId) {
+    if (!accessToken || !siteId) {
       return res.status(400).json({
         success: false,
         error: 'Missing required parameters',
-        message: 'Both idToken and siteId are required'
+        message: 'Both accessToken and siteId are required'
       });
     }
 
-    // Verify ID token with Webflow
-    // Reference: https://developers.webflow.com/data/docs/authenticating-users-with-id-tokens
+    // Verify token with Webflow
     const tokenResponse = await axios.get(`${WEBFLOW_API_BASE}/token/authorized_by`, {
       headers: {
-        'Authorization': `Bearer ${idToken}`,
+        'Authorization': `Bearer ${accessToken}`,
         'Accept': 'application/json'
       }
     });
@@ -210,69 +209,46 @@ app.post('/auth/id-token', async (req, res) => {
     if (!tokenResponse.data || !tokenResponse.data.user) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid ID token',
-        message: 'Failed to verify ID token with Webflow'
+        error: 'Invalid token',
+        message: 'Failed to verify token with Webflow'
       });
     }
 
     const userId = tokenResponse.data.user.id;
     const userEmail = tokenResponse.data.user.email;
 
-    // Verify user has access to the site
-    const sitesResponse = await axios.get(`${WEBFLOW_API_BASE}/sites`, {
-      headers: {
-        'Authorization': `Bearer ${idToken}`,
-        'Accept': 'application/json'
-      }
-    });
-
-    const userSites = sitesResponse.data.sites || [];
-    const hasAccessToSite = userSites.some(site => site.id === siteId);
-
-    if (!hasAccessToSite) {
-      return res.status(403).json({
-        success: false,
-        error: 'Access denied',
-        message: 'User does not have access to the specified site'
-      });
-    }
-
-    // Generate session token
-    const sessionToken = generateSessionToken(userId, siteId);
-
     // Store user info in session
     req.session.userId = userId;
     req.session.userEmail = userEmail;
     req.session.siteId = siteId;
-    req.session.accessToken = idToken; // Store ID token for API calls
+    req.session.accessToken = accessToken;
 
-    console.log(`ID Token authentication successful for user: ${userEmail} (${userId}) on site: ${siteId}`);
+    console.log(`Token verification successful for user: ${userEmail} (${userId}) on site: ${siteId}`);
 
     res.json({
       success: true,
-      sessionToken: sessionToken,
       user: {
         id: userId,
         email: userEmail
       },
       siteId: siteId,
-      message: 'Authentication successful'
+      message: 'Token verified successfully'
     });
 
   } catch (error) {
-    console.error('ID Token verification error:', error);
+    console.error('Token verification error:', error);
     
     if (error.response?.status === 401) {
       return res.status(401).json({
         success: false,
-        error: 'Invalid ID token',
-        message: 'The provided ID token is invalid or expired'
+        error: 'Invalid token',
+        message: 'The provided token is invalid or expired'
       });
     }
 
     res.status(500).json({
       success: false,
-      error: 'Authentication failed',
+      error: 'Token verification failed',
       message: error.message || 'Unknown error occurred'
     });
   }
@@ -599,21 +575,8 @@ app.get('/deep-link', async (req, res) => {
 // Get pages endpoint
 app.get('/pages', async (req, res) => {
   try {
-    // Check for access token in Authorization header first, then session
-    let accessToken = null;
-    let siteId = null;
-    
-    // Check Authorization header
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      accessToken = authHeader.substring(7);
-      // For header-based auth, get siteId from X-Site-ID header or session
-      siteId = req.headers['x-site-id'] || req.session?.siteId;
-    } else {
-      // Fallback to session-based auth
-      accessToken = getUserToken(req);
-      siteId = req.session?.siteId;
-    }
+    const accessToken = getUserToken(req);
+    const siteId = req.session.siteId;
 
     if (!accessToken) {
       return res.status(401).json({ 
@@ -693,18 +656,7 @@ app.patch('/pages/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { seo } = req.body;
-    
-    // Check for access token in Authorization header first, then session
-    let accessToken = null;
-    
-    // Check Authorization header
-    const authHeader = req.headers.authorization;
-    if (authHeader && authHeader.startsWith('Bearer ')) {
-      accessToken = authHeader.substring(7);
-    } else {
-      // Fallback to session-based auth
-      accessToken = getUserToken(req);
-    }
+    const accessToken = getUserToken(req);
 
     if (!accessToken) {
       return res.status(401).json({ 
