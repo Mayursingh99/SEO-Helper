@@ -129,17 +129,23 @@ const App = () => {
 
     // Add message listener for OAuth callbacks
     const handleMessage = (event) => {
-      // Only accept messages from our backend domain
-      const allowedOrigin = BACKEND_URL.replace('https://', '').replace('http://', '');
+      console.log('Message received:', event.origin, event.data);
       
-      if (event.origin !== allowedOrigin) {
+      // Accept messages from our backend domain or any origin for OAuth messages
+      const allowedOrigin = BACKEND_URL.replace('https://', '').replace('http://', '');
+      const isOAuthMessage = event.data && (event.data.type === 'OAUTH_SUCCESS' || event.data.type === 'OAUTH_ERROR');
+      
+      if (event.origin !== allowedOrigin && !isOAuthMessage) {
+        console.log('Message origin not allowed:', event.origin, 'Expected:', allowedOrigin);
         return;
       }
 
       if (event.data.type === 'OAUTH_SUCCESS') {
+        console.log('OAuth success message received');
         const { accessToken, siteId, siteShortName } = event.data;
         handleOAuthSuccess(accessToken, siteId, siteShortName);
       } else if (event.data.type === 'OAUTH_ERROR') {
+        console.log('OAuth error message received');
         setError(`OAuth failed: ${event.data.error}`);
       }
     };
@@ -237,11 +243,16 @@ const App = () => {
   // Handle OAuth success
   const handleOAuthSuccess = async (accessToken, siteId, siteShortName) => {
     try {
+      console.log('Handling OAuth success:', { accessToken: accessToken ? 'present' : 'missing', siteId, siteShortName });
+      
       // First, verify the token with the server
+      console.log('Verifying token with server...');
       const verifyResponse = await api.post('/auth/verify-token', {
         accessToken: accessToken,
         siteId: siteId
       });
+      
+      console.log('Token verification response:', verifyResponse.data);
       
       if (verifyResponse.data.success) {
         // Store the token locally
@@ -252,6 +263,7 @@ const App = () => {
           siteShortName: siteShortName
         };
         localStorage.setItem('seo-helper-oauth-token', JSON.stringify(tokenData));
+        console.log('Token stored in localStorage');
         
         // Update site info if needed
         if (selectedSite && selectedSite.id !== siteId) {
@@ -262,6 +274,7 @@ const App = () => {
         }
         
         // Load pages
+        console.log('Loading pages...');
         await loadPages();
         
         setSuccessMessage('Successfully connected to Webflow!');
