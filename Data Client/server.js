@@ -190,7 +190,13 @@ app.post('/auth/verify-token', async (req, res) => {
   try {
     const { accessToken, siteId } = req.body;
 
+    console.log('Token verification request received:', { 
+      accessToken: accessToken ? `${accessToken.substring(0, 10)}...` : 'missing',
+      siteId: siteId 
+    });
+
     if (!accessToken || !siteId) {
+      console.log('Missing required parameters');
       return res.status(400).json({
         success: false,
         error: 'Missing required parameters',
@@ -199,6 +205,7 @@ app.post('/auth/verify-token', async (req, res) => {
     }
 
     // Verify token with Webflow
+    console.log('Verifying token with Webflow API...');
     const tokenResponse = await axios.get(`${WEBFLOW_API_BASE}/token/authorized_by`, {
       headers: {
         'Authorization': `Bearer ${accessToken}`,
@@ -206,7 +213,10 @@ app.post('/auth/verify-token', async (req, res) => {
       }
     });
 
+    console.log('Webflow API response:', tokenResponse.data);
+
     if (!tokenResponse.data || !tokenResponse.data.user) {
+      console.log('Invalid token response from Webflow');
       return res.status(401).json({
         success: false,
         error: 'Invalid token',
@@ -238,18 +248,25 @@ app.post('/auth/verify-token', async (req, res) => {
   } catch (error) {
     console.error('Token verification error:', error);
     
+    if (error.response) {
+      console.error('Error response status:', error.response.status);
+      console.error('Error response data:', error.response.data);
+    }
+    
     if (error.response?.status === 401) {
       return res.status(401).json({
         success: false,
         error: 'Invalid token',
-        message: 'The provided token is invalid or expired'
+        message: 'The provided token is invalid or expired',
+        details: error.response?.data || 'No additional details'
       });
     }
 
     res.status(500).json({
       success: false,
       error: 'Token verification failed',
-      message: error.message || 'Unknown error occurred'
+      message: error.message || 'Unknown error occurred',
+      details: error.response?.data || 'No additional details'
     });
   }
 });
