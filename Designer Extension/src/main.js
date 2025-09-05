@@ -5,12 +5,6 @@ import { ThemeProvider } from "@mui/material/styles";
 import Button from "@mui/material/Button";
 import Container from "@mui/material/Container";
 import Typography from "@mui/material/Typography";
-import Paper from "@mui/material/Paper";
-import TextField from "@mui/material/TextField";
-import MenuItem from "@mui/material/MenuItem";
-import Select from "@mui/material/Select";
-import FormControl from "@mui/material/FormControl";
-import InputLabel from "@mui/material/InputLabel";
 import Box from "@mui/material/Box";
 import Stack from "@mui/material/Stack";
 import Card from "@mui/material/Card";
@@ -18,13 +12,16 @@ import CardContent from "@mui/material/CardContent";
 import LinearProgress from "@mui/material/LinearProgress";
 import Chip from "@mui/material/Chip";
 import Alert from "@mui/material/Alert";
-import AlertTitle from "@mui/material/AlertTitle";
+import FormControl from "@mui/material/FormControl";
+import InputLabel from "@mui/material/InputLabel";
+import Select from "@mui/material/Select";
+import MenuItem from "@mui/material/MenuItem";
+import TextField from "@mui/material/TextField";
 import Divider from "@mui/material/Divider";
 import Grid from "@mui/material/Grid";
 import Tooltip from "@mui/material/Tooltip";
 import IconButton from "@mui/material/IconButton";
 import RefreshIcon from "@mui/icons-material/Refresh";
-import InfoIcon from "@mui/icons-material/Info";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import WarningIcon from "@mui/icons-material/Warning";
 import ErrorIcon from "@mui/icons-material/Error";
@@ -44,13 +41,12 @@ const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
 
-  // Backend URL - use environment variable or default to production
-  const BACKEND_URL = process.env.BACKEND_URL || 'https://seo-helper.onrender.com';
+  // Backend URL
+  const BACKEND_URL = 'https://seo-helper.onrender.com';
   
-  // Create axios instance with credentials
+  // Create axios instance
   const api = axios.create({
     baseURL: BACKEND_URL,
-    withCredentials: true,
     timeout: 10000
   });
 
@@ -88,7 +84,6 @@ const App = () => {
       const initializeApp = async () => {
         try {
           // Get site info from Webflow Designer Extension API
-          // Reference: https://developers.webflow.com/designer/reference/pages-overview
           const info = await webflow.getSiteInfo();
           const siteId = info.siteId;
           const displayName = info?.siteName || info?.displayName || info?.shortName || siteId;
@@ -96,49 +91,29 @@ const App = () => {
           
           setSelectedSite(site);
           
-                    // Check if user is already authenticated (local storage + backend check)
-          // First check if they're authorized for this site
-          const isAuthorized = await isUserAuthorizedForSite();
-          if (isAuthorized) {
-            await checkPersistentAuthentication();
-          } else {
-            // Check if this is an installed app that should auto-authorize
-            console.log('Checking if app is installed and authorized...');
-            const isInstalled = await isAppInstalled();
-            
-            if (isInstalled) {
-              console.log('App is installed and authorized!');
-              // Store this as an installed app
-              const siteInfo = await webflow.getSiteInfo();
-              const authData = {
-                accessToken: 'webflow-installed-auth',
-                timestamp: Date.now(),
-                siteId: siteInfo.siteId,
-                siteShortName: siteInfo.shortName || siteInfo.siteName,
-                isInstalledApp: true
-              };
-              localStorage.setItem('seo-helper-oauth-token', JSON.stringify(authData));
-              
-              // Get pages data for installed app
-              try {
-                const pagesResponse = await api.get('/pages');
-                setPages(pagesResponse.data.pages || []);
-                console.log('Pages loaded for installed app:', pagesResponse.data.pages.length);
-              } catch (error) {
-                console.log('Failed to get pages for installed app:', error.message);
-                setPages([]);
+          // Check if we have a stored session token
+          const storedSessionToken = localStorage.getItem('seo-helper-session-token');
+          if (storedSessionToken) {
+            try {
+              const sessionData = JSON.parse(storedSessionToken);
+              // Check if session is for current site
+              if (sessionData.siteId === siteId) {
+                // Set session token in headers
+                api.defaults.headers.common['Authorization'] = `Bearer ${sessionData.sessionToken}`;
+                // Try to load pages
+                await loadPages();
+              } else {
+                // Session is for different site, clear it
+                localStorage.removeItem('seo-helper-session-token');
+                setIsAuthenticated(false);
               }
-              
-              // Set authenticated state
-              setIsAuthenticated(true);
-              setSuccessMessage("App authorized! Your pages are loaded.");
-              setTimeout(() => setSuccessMessage(""), 3000);
-            } else {
-              console.log('App not installed or authorized - showing connect button');
-              // User needs to authorize for this site
+            } catch (error) {
+              console.error('Failed to parse stored session token:', error);
+              localStorage.removeItem('seo-helper-session-token');
               setIsAuthenticated(false);
-              setPages([]);
             }
+          } else {
+            setIsAuthenticated(false);
           }
         } catch (e) {
           console.error('Initialization error:', e);
@@ -148,412 +123,124 @@ const App = () => {
 
       initializeApp();
     } else {
-      // Not in Webflow environment - show error
       setError("This app must be run within the Webflow Designer");
     }
-
-    // Add message listener for OAuth callbacks from popup
-    // Following Webflow Hybrid App guidelines for secure communication
-    const handleMessage = (event) => {
-      // Only accept messages from our backend domain
-      if (event.origin !== BACKEND_URL.replace('https://', '').replace('http://', '')) {
-        return;
-      }
-
-      if (event.data.type === 'OAUTH_SUCCESS') {
-        const { accessToken, siteId, siteShortName } = event.data;
-        handleOAuthCallback(accessToken, siteId, siteShortName);
-      } else if (event.data.type === 'OAUTH_ERROR') {
-        setError(`OAuth failed: ${event.data.error}`);
-        if (event.data.details) {
-          console.error('OAuth error details:', event.data.details);
-        }
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-
-    // Cleanup
-    return () => {
-      window.removeEventListener('message', handleMessage);
-    };
   }, []);
 
-  // Check if app is running in installed context (marketplace installation)
-  // Following Webflow Designer Extension guidelines for automatic authorization
-  const isAppInstalled = async () => {
+  // Load pages from backend
+  const loadPages = async () => {
     try {
-      if (typeof webflow === 'undefined') return false;
-      
-      // For Designer Extensions, we need to check if we're in an authorized context
-      // This happens when the app is installed from the marketplace
-      const siteInfo = await webflow.getSiteInfo();
-      console.log('Checking if app is installed for site:', siteInfo.siteId);
-      
-      // First, check if we can access site info - this indicates basic authorization
-      if (siteInfo && siteInfo.siteId) {
-        console.log('Basic site access confirmed');
-        
-        // Now try to access the API with Webflow's built-in authorization
-        // If this works, the app is already authorized
-        try {
-          const response = await api.get('/pages');
-          if (response.data.pages && response.data.pages.length > 0) {
-            console.log('App is installed and authorized! Pages found:', response.data.pages.length);
-            return true;
-          }
-        } catch (error) {
-          if (error.response?.status === 401) {
-            console.log('App not authorized - 401 error');
-            return false;
-          }
-          console.log('API call failed:', error.message);
-          
-          // Fallback: Try to use Webflow's Designer Extension API directly
-          // This might work if the app is installed but backend is having issues
-          try {
-            console.log('Trying Webflow Designer Extension API fallback...');
-            // Note: webflow.getPages() doesn't exist, but we can check other Designer APIs
-            const currentPage = await webflow.getCurrentPage();
-            if (currentPage) {
-              console.log('Designer Extension API access confirmed via current page');
-              return true; // If we can access Designer APIs, the app is installed
-            }
-          } catch (designerError) {
-            console.log('Designer Extension API fallback failed:', designerError.message);
-          }
-          
-          return false;
-        }
-      }
-      
-      return false;
-    } catch (error) {
-      console.error('Failed to check if app is installed:', error);
-      return false;
-    }
-  };
-
-  // Check if user is already authorized for current site
-  // Following Webflow Designer Extension guidelines for automatic authorization detection
-  const isUserAuthorizedForSite = async () => {
-    try {
-      if (typeof webflow === 'undefined') return false;
-      
-      const siteInfo = await webflow.getSiteInfo();
-      console.log('Current site info:', siteInfo);
-      
-      // First check if we have a stored token for this site
-      const storedToken = localStorage.getItem('seo-helper-oauth-token');
-      if (storedToken) {
-        const tokenData = JSON.parse(storedToken);
-        // Check if stored token is for the current site
-        if (tokenData.siteId === siteInfo.siteId) {
-          console.log('Found stored token for current site');
-          return true;
-        }
-      }
-      
-      // If no stored token, check if the app is already authorized via Webflow's system
-      // This happens when user installs the app and grants permissions
-      try {
-        // Try to make a direct API call to see if we're authorized
-        const response = await api.get('/pages');
-        if (response.data.pages) {
-          console.log('App is already authorized for this site');
-          // Store the authorization info for future use
-          const authData = {
-            accessToken: 'webflow-installed-auth', // Special marker for installed app
-            timestamp: Date.now(),
-            siteId: siteInfo.siteId,
-            siteShortName: siteInfo.shortName || siteInfo.siteName,
-            isInstalledApp: true
-          };
-          localStorage.setItem('seo-helper-oauth-token', JSON.stringify(authData));
-          return true;
-        }
-      } catch (error) {
-        if (error.response?.status === 401) {
-          console.log('App not authorized for this site');
-          return false;
-        }
-        // Other errors, assume not authorized
-        console.log('Error checking authorization:', error.message);
-        return false;
-      }
-      
-      return false;
-    } catch (error) {
-      console.error('Failed to check site authorization:', error);
-      return false;
-    }
-  };
-
-  // Check persistent authentication status following Webflow Designer Extension guidelines
-  // Reference: https://developers.webflow.com/data/docs/designer-extensions
-  const checkPersistentAuthentication = async () => {
-    try {
+      setLoading(true);
       setError("");
       
-      // First, check if we're in a Webflow Designer environment
-      if (typeof webflow === 'undefined') {
-        setError("This app must be run within the Webflow Designer");
-        return;
-      }
-
-      // Check local storage for stored OAuth token
-      const storedToken = localStorage.getItem('seo-helper-oauth-token');
-      const hasStoredToken = storedToken && JSON.parse(storedToken).accessToken;
-      
-      if (hasStoredToken) {
-        // User has stored token, validate it with backend
-        try {
-          const tokenData = JSON.parse(storedToken);
-          
-          // Check if this is an installed app (no OAuth token needed)
-          if (tokenData.isInstalledApp) {
-            console.log('Using installed app authorization');
-            // For installed apps, we can directly access the API
-            try {
-              const response = await api.get('/pages');
-              if (response.data.pages) {
-                setIsAuthenticated(true);
-                setPages(response.data.pages);
-                setSuccessMessage("App authorized! Your pages are loaded.");
-                setTimeout(() => setSuccessMessage(""), 3000);
-                return;
-              }
-            } catch (error) {
-              console.log('Installed app API call failed:', error.message);
-              // Fall through to regular token validation
-            }
-          }
-          
-          // Regular OAuth token validation
-          const tempApi = axios.create({
-            baseURL: BACKEND_URL,
-            timeout: 10000,
-            headers: {
-              'Authorization': `Bearer ${tokenData.accessToken}`
-            }
-          });
-          
-          // Test if token is still valid by making a request
-          const response = await tempApi.get('/pages');
-          
-          if (response.data.pages) {
-            // Token is valid, user is authenticated
-            setIsAuthenticated(true);
-            setPages(response.data.pages);
-            setSuccessMessage("Welcome back! Your pages are loaded.");
-            setTimeout(() => setSuccessMessage(""), 3000);
-            
-            // Update the main api instance with the valid token
-            api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.accessToken}`;
-            return;
-          }
-        } catch (error) {
-          if (error.response?.status === 401) {
-            // Token expired, clear stored token and show login
-            localStorage.removeItem('seo-helper-oauth-token');
-            setIsAuthenticated(false);
-            setPages([]);
-            console.log('Stored OAuth token expired, re-authorization needed');
-          } else {
-            // Other error, try to continue with stored token
-            console.warn('Token validation failed, using stored token:', error.message);
-            setIsAuthenticated(true);
-            // Try to get pages again
-            await checkAuthenticationStatus();
-          }
-        }
-      } else {
-        // No stored token, check if user needs to authorize
-        // For Designer Extensions, we should check if the user has authorized the app
-        try {
-          // Try to get site info using Designer API
-          const siteInfo = await webflow.getSiteInfo();
-          console.log('Site info retrieved:', siteInfo);
-          
-          // If we can get site info, the user has access to this site
-          // Check if they need to authorize for data access
-          setIsAuthenticated(false);
-          setPages([]);
-        } catch (error) {
-          console.error('Failed to get site info:', error);
-          setError("Unable to access site information");
-        }
-      }
-    } catch (error) {
-      console.error('Persistent authentication check failed:', error);
-      setError("Failed to check authentication status");
-    }
-  };
-
-  const checkAuthenticationStatus = async () => {
-    try {
-      setError("");
-      
-      // Check if we have a stored token first
-      const storedToken = localStorage.getItem('seo-helper-oauth-token');
-      if (storedToken) {
-        const tokenData = JSON.parse(storedToken);
-        // Set the stored token in headers
-        api.defaults.headers.common['Authorization'] = `Bearer ${tokenData.accessToken}`;
-      }
-      
-      // Try to get pages with current authorization
       const response = await api.get('/pages');
       
-      if (response.data.pages) {
-        // User is authenticated
-        setIsAuthenticated(true);
+      if (response.data && response.data.pages) {
         setPages(response.data.pages);
-        
-        setSuccessMessage("Successfully connected to backend!");
+        setIsAuthenticated(true);
+        setSuccessMessage(`Successfully loaded ${response.data.pages.length} pages!`);
         setTimeout(() => setSuccessMessage(""), 3000);
-        
-        // Log successful authentication for debugging
-        console.log('OAuth callback successful:', { siteId, siteShortName });
+      } else {
+        throw new Error('Invalid response format from API');
       }
+      
     } catch (error) {
+      console.error('Failed to load pages:', error);
+      
       if (error.response?.status === 401) {
-        // User is not authenticated
+        setError("Authentication failed. Please re-authorize the app.");
         setIsAuthenticated(false);
         setPages([]);
         localStorage.removeItem('seo-helper-oauth-token');
         delete api.defaults.headers.common['Authorization'];
+      } else if (error.response?.status === 404) {
+        setError("Pages endpoint not found. Please check backend configuration.");
+      } else if (error.response?.status >= 500) {
+        setError("Backend server error. Please try again later.");
       } else {
-        console.error('Authentication check failed:', error);
-        setError("Failed to check authentication status");
+        setError(`Failed to load pages: ${error.message}`);
       }
+      
+      setPages([]);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Start OAuth flow following Webflow Designer Extension best practices
-  // Reference: https://developers.webflow.com/designer/reference/introduction
-  const startOAuthFlow = async () => {
+  // Start ID Token authentication flow as per Webflow documentation
+  const startIdTokenAuth = async () => {
     try {
       setAuthLoading(true);
       setError("");
       
-      // First, check if we're in the right context
-      if (typeof webflow === 'undefined') {
-        throw new Error('This app must be run within the Webflow Designer');
+      // Get ID token from Webflow Designer Extension API
+      const idToken = await webflow.getIdToken();
+      
+      if (!idToken) {
+        throw new Error('Failed to get ID token from Webflow');
       }
-
-      // Get current site info to ensure we're in the right context
+      
+      // Get site info
       const siteInfo = await webflow.getSiteInfo();
-      console.log('Current site context:', siteInfo);
+      const siteId = siteInfo.siteId;
       
-      // Get OAuth authorization URL from backend
-      const response = await api.get('/auth');
-      const { authorizeUrl } = response.data;
+      // Send ID token to Data Client for verification and session creation
+      const response = await api.post('/auth/id-token', {
+        idToken: idToken,
+        siteId: siteId
+      });
       
-      if (!authorizeUrl) {
-        throw new Error('No authorization URL received');
+      if (response.data.success && response.data.sessionToken) {
+        // Store session token
+        const sessionData = {
+          sessionToken: response.data.sessionToken,
+          siteId: siteId,
+          timestamp: Date.now()
+        };
+        localStorage.setItem('seo-helper-session-token', JSON.stringify(sessionData));
+        
+        // Set session token in headers
+        api.defaults.headers.common['Authorization'] = `Bearer ${response.data.sessionToken}`;
+        
+        // Load pages
+        await loadPages();
+        
+        setSuccessMessage('Successfully authenticated with Webflow!');
+        setTimeout(() => setSuccessMessage(''), 3000);
+      } else {
+        throw new Error('Failed to create session with Data Client');
       }
-      
-      // Open OAuth popup with proper dimensions for Designer Extension
-      const popup = window.open(
-        authorizeUrl,
-        'webflow-oauth',
-        'width=600,height=700,scrollbars=yes,resizable=yes,status=yes,location=yes'
-      );
-      
-      if (!popup) {
-        throw new Error('Popup blocked. Please allow popups for this site.');
-      }
-      
-      // Focus the popup
-      popup.focus();
-      
-      // Poll for popup closure and check authentication
-      const checkClosed = setInterval(async () => {
-        if (popup.closed) {
-          clearInterval(checkClosed);
-          setAuthLoading(false);
-          
-          // Check if authentication was successful and store token
-          await checkAuthenticationStatus();
-        }
-      }, 1000);
       
     } catch (error) {
-      console.error('OAuth flow failed:', error);
-      setError(`OAuth failed: ${error.message}`);
+      console.error('ID Token authentication failed:', error);
+      setError(`Authentication failed: ${error.message}`);
+    } finally {
       setAuthLoading(false);
     }
   };
 
-  // Handle OAuth callback and store access token
-  // Following Webflow Hybrid App guidelines
-  const handleOAuthCallback = async (accessToken, siteId, siteShortName) => {
-    try {
-      if (accessToken && siteId) {
-        // Store the OAuth access token locally following Webflow best practices
-        const tokenData = {
-          accessToken: accessToken,
-          timestamp: Date.now(),
-          siteId: siteId,
-          siteShortName: siteShortName,
-          lastUsed: Date.now()
-        };
-        localStorage.setItem('seo-helper-oauth-token', JSON.stringify(tokenData));
-        
-        // Set the token in axios headers for API calls
-        api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
-        
-        // Update site information if needed
-        if (selectedSite && selectedSite.id !== siteId) {
-          setSelectedSite({
-            id: siteId,
-            displayName: siteShortName || siteId
-          });
-        }
-        
-        // Now check authentication status with the stored token
-        await checkAuthenticationStatus();
-        
-        setSuccessMessage('Successfully connected to Webflow!');
-        setTimeout(() => setSuccessMessage(''), 3000);
-      }
-    } catch (error) {
-      console.error('Failed to handle OAuth callback:', error);
-      setError('Failed to complete authentication');
-    }
-  };
 
-  // Smart refresh that checks authentication status before showing popup
-  // Following Webflow Designer Extension best practices
+  // Refresh data
   const refreshData = async () => {
     try {
       setError("");
       setSuccessMessage("");
       
       if (isAuthenticated) {
-        // User is authenticated, just refresh pages
-        await checkAuthenticationStatus();
+        await loadPages();
       } else {
-        // Check if we have a stored token first
-        const storedToken = localStorage.getItem('seo-helper-oauth-token');
-        if (storedToken) {
-          // Try to use stored token first
-          await checkPersistentAuthentication();
-        } else {
-          // No stored token, user needs to authenticate
-          await startOAuthFlow();
-        }
+        await startIdTokenAuth();
       }
     } catch (e) {
       setError(`Failed to refresh: ${e.message}`);
     }
   };
 
+  // Logout
   const logout = async () => {
     try {
-      // Clear stored OAuth token
-      localStorage.removeItem('seo-helper-oauth-token');
+      // Clear stored session token
+      localStorage.removeItem('seo-helper-session-token');
       
       // Clear backend session
       await api.post('/logout');
@@ -572,13 +259,14 @@ const App = () => {
       setTimeout(() => setSuccessMessage(""), 3000);
     } catch (error) {
       console.error('Logout failed:', error);
-      // Still clear local state even if backend logout fails
+      // Still clear local state
       setIsAuthenticated(false);
       setPages([]);
       delete api.defaults.headers.common['Authorization'];
     }
   };
 
+  // Start editing SEO
   const startEditSeo = (page) => {
     setEditingPage(page);
     setSeoTitle(page?.seo?.title || "");
@@ -587,6 +275,7 @@ const App = () => {
     setSuccessMessage("");
   };
 
+  // Save SEO
   const saveSeo = async () => {
     if (!editingPage) return;
     
@@ -603,7 +292,7 @@ const App = () => {
       });
       
       // Refresh pages to get updated data
-      await checkAuthenticationStatus();
+      await loadPages();
       
       setEditingPage(null);
       setSuccessMessage("SEO updated successfully!");
@@ -621,6 +310,7 @@ const App = () => {
     }
   };
 
+  // Get page status
   const getPageStatus = (page) => {
     const hasTitle = page.seo?.title?.trim();
     const hasDescription = page.seo?.description?.trim();
@@ -630,6 +320,7 @@ const App = () => {
     return "missing";
   };
 
+  // Get status color
   const getStatusColor = (status) => {
     switch (status) {
       case "complete": return "success";
@@ -639,22 +330,13 @@ const App = () => {
     }
   };
 
+  // Get status icon
   const getStatusIcon = (status) => {
     switch (status) {
       case "complete": return <CheckCircleIcon fontSize="small" />;
       case "partial": return <WarningIcon fontSize="small" />;
       case "missing": return <ErrorIcon fontSize="small" />;
       default: return null;
-    }
-  };
-
-  const statusChipSx = {
-    '& .MuiChip-label': {
-      fontSize: '0.875rem',
-      fontWeight: 400
-    },
-    '& .MuiChip-icon': {
-      fontSize: '0.875rem'
     }
   };
 
@@ -691,33 +373,33 @@ const App = () => {
                     sx={{ background: "rgba(102, 126, 234, 0.1)", color: "#667eea" }}
                   />
                 )}
-                                 <Tooltip title="Refresh data">
-                   <IconButton 
-                     onClick={refreshData} 
-                     disabled={loading || authLoading}
-                     sx={{ 
-                       background: "rgba(102, 126, 234, 0.1)",
-                       "&:hover": { background: "rgba(102, 126, 234, 0.2)" }
-                     }}
-                   >
-                     <RefreshIcon />
-                   </IconButton>
-                 </Tooltip>
-                 
-                 {isAuthenticated && (
-                   <Tooltip title="Logout">
-                     <IconButton 
-                       onClick={logout}
-                       sx={{ 
-                         background: "rgba(231, 76, 60, 0.1)",
-                         color: "#e74c3c",
-                         "&:hover": { background: "rgba(231, 76, 60, 0.2)" }
-                       }}
-                     >
-                       <InfoIcon />
-                     </IconButton>
-                   </Tooltip>
-                 )}
+                <Tooltip title="Refresh data">
+                  <IconButton 
+                    onClick={refreshData} 
+                    disabled={loading || authLoading}
+                    sx={{ 
+                      background: "rgba(102, 126, 234, 0.1)",
+                      "&:hover": { background: "rgba(102, 126, 234, 0.2)" }
+                    }}
+                  >
+                    <RefreshIcon />
+                  </IconButton>
+                </Tooltip>
+                
+                {isAuthenticated && (
+                  <Tooltip title="Logout">
+                    <IconButton 
+                      onClick={logout}
+                      sx={{ 
+                        background: "rgba(231, 76, 60, 0.1)",
+                        color: "#e74c3c",
+                        "&:hover": { background: "rgba(231, 76, 60, 0.2)" }
+                      }}
+                    >
+                      <Typography variant="body2">Logout</Typography>
+                    </IconButton>
+                  </Tooltip>
+                )}
               </Stack>
             </Stack>
           </Box>
@@ -725,7 +407,6 @@ const App = () => {
           {/* Error/Success Messages */}
           {error && (
             <Alert severity="error" sx={{ mb: 1, borderRadius: 2 }}>
-              <AlertTitle sx={{ fontSize: "0.95rem" }}>Error</AlertTitle>
               <Typography variant="body1">{error}</Typography>
             </Alert>
           )}
@@ -749,14 +430,13 @@ const App = () => {
                 <Typography variant="h6" sx={{ mb: 2, fontWeight: 600, color: "#2c3e50" }}>
                   🔐 Connect to Webflow
                 </Typography>
-                                 <Typography variant="body2" sx={{ mb: 2, color: "#666" }}>
-                   To access and edit your page SEO for this site, you need to authorize this app with your Webflow account. 
-                   If you've already installed this app from the marketplace, it should authorize automatically.
-                 </Typography>
+                <Typography variant="body2" sx={{ mb: 2, color: "#666" }}>
+                  To access and edit your page SEO for this site, you need to authorize this app with your Webflow account.
+                </Typography>
                 
                 <Button 
                   variant="contained" 
-                  onClick={startOAuthFlow}
+                  onClick={startIdTokenAuth}
                   disabled={authLoading}
                   sx={{ 
                     borderRadius: 2,
@@ -766,7 +446,7 @@ const App = () => {
                     }
                   }}
                 >
-                  {authLoading ? "Connecting..." : "🔐 Connect with Webflow"}
+                  {authLoading ? "Authenticating..." : "🔐 Authenticate with Webflow"}
                 </Button>
               </CardContent>
             </Card>
@@ -925,7 +605,6 @@ const App = () => {
                                 color={getStatusColor(getPageStatus(page))}
                                 size="small"
                                 icon={getStatusIcon(getPageStatus(page))}
-                                sx={statusChipSx}
                               />
                             </Box>
                           );
@@ -951,7 +630,6 @@ const App = () => {
                                 color={getStatusColor(getPageStatus(p))}
                                 size="small"
                                 icon={getStatusIcon(getPageStatus(p))}
-                                sx={statusChipSx}
                               />
                             </Box>
                           </MenuItem>
@@ -986,9 +664,6 @@ const App = () => {
                                 '& .MuiOutlinedInput-root': {
                                   borderRadius: 2,
                                   background: 'rgba(255,255,255,0.8)'
-                                },
-                                '& .MuiFormHelperText-root': {
-                                  fontSize: '0.875rem'
                                 }
                               }}
                             />
@@ -1007,9 +682,6 @@ const App = () => {
                                 '& .MuiOutlinedInput-root': {
                                   borderRadius: 2,
                                   background: 'rgba(255,255,255,0.8)'
-                                },
-                                '& .MuiFormHelperText-root': {
-                                  fontSize: '0.875rem'
                                 }
                               }}
                             />

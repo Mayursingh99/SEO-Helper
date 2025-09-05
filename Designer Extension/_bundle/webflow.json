@@ -1,5 +1,14 @@
 {
   "name": "SEO Helper",
   "publicDir": "public",
-  "size": "large"
+  "apiVersion": "2",
+  "size": "large",
+  "description": "Professional SEO management tool for Webflow sites with secure ID token authentication",
+  "version": "1.0.0",
+  "author": "SEO Helper Team",
+  "category": "SEO & Analytics",
+  "permissions": [
+    "sites:read",
+    "authorized_user:read"
+  ]
 }

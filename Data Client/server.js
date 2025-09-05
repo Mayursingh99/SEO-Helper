@@ -5,6 +5,8 @@ const bodyParser = require('body-parser');
 const cookieSession = require('cookie-session');
 const querystring = require('querystring');
 const { WebflowClient } = require('webflow-api');
+const jwt = require('jsonwebtoken');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -67,6 +69,13 @@ const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID;
 const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET;
 const OAUTH_REDIRECT_URI = process.env.OAUTH_REDIRECT_URI;
 
+// Session management
+const SESSION_SECRET = process.env.SESSION_SECRET || 'default-session-secret';
+const SESSION_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+
+// Store active sessions (in production, use Redis or database)
+const activeSessions = new Map();
+
 // Helper function to get user's access token
 const getUserToken = (req) => {
   return req.session.accessToken;
@@ -80,6 +89,59 @@ const setUserToken = (req, token) => {
 // Helper function to clear user's session
 const clearUserSession = (req) => {
   req.session = null;
+};
+
+// Helper function to generate session token
+const generateSessionToken = (userId, siteId) => {
+  const sessionId = crypto.randomUUID();
+  const sessionData = {
+    userId,
+    siteId,
+    createdAt: Date.now(),
+    expiresAt: Date.now() + SESSION_DURATION
+  };
+  
+  // Store session data
+  activeSessions.set(sessionId, sessionData);
+  
+  // Generate JWT token
+  const token = jwt.sign(
+    { 
+      sessionId,
+      userId,
+      siteId,
+      type: 'session'
+    },
+    SESSION_SECRET,
+    { expiresIn: '24h' }
+  );
+  
+  return token;
+};
+
+// Helper function to verify session token
+const verifySessionToken = (token) => {
+  try {
+    const decoded = jwt.verify(token, SESSION_SECRET);
+    
+    if (decoded.type !== 'session') {
+      return null;
+    }
+    
+    const sessionData = activeSessions.get(decoded.sessionId);
+    if (!sessionData || sessionData.expiresAt < Date.now()) {
+      activeSessions.delete(decoded.sessionId);
+      return null;
+    }
+    
+    return {
+      userId: decoded.userId,
+      siteId: decoded.siteId,
+      sessionId: decoded.sessionId
+    };
+  } catch (error) {
+    return null;
+  }
 };
 
 // Health check endpoint
@@ -121,6 +183,99 @@ app.get('/session', (req, res) => {
   };
   
   res.json(sessionInfo);
+});
+
+// ID Token verification endpoint as per Webflow documentation
+app.post('/auth/id-token', async (req, res) => {
+  try {
+    const { idToken, siteId } = req.body;
+
+    if (!idToken || !siteId) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required parameters',
+        message: 'Both idToken and siteId are required'
+      });
+    }
+
+    // Verify ID token with Webflow
+    // Reference: https://developers.webflow.com/data/docs/authenticating-users-with-id-tokens
+    const tokenResponse = await axios.get(`${WEBFLOW_API_BASE}/token/authorized_by`, {
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!tokenResponse.data || !tokenResponse.data.user) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid ID token',
+        message: 'Failed to verify ID token with Webflow'
+      });
+    }
+
+    const userId = tokenResponse.data.user.id;
+    const userEmail = tokenResponse.data.user.email;
+
+    // Verify user has access to the site
+    const sitesResponse = await axios.get(`${WEBFLOW_API_BASE}/sites`, {
+      headers: {
+        'Authorization': `Bearer ${idToken}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    const userSites = sitesResponse.data.sites || [];
+    const hasAccessToSite = userSites.some(site => site.id === siteId);
+
+    if (!hasAccessToSite) {
+      return res.status(403).json({
+        success: false,
+        error: 'Access denied',
+        message: 'User does not have access to the specified site'
+      });
+    }
+
+    // Generate session token
+    const sessionToken = generateSessionToken(userId, siteId);
+
+    // Store user info in session
+    req.session.userId = userId;
+    req.session.userEmail = userEmail;
+    req.session.siteId = siteId;
+    req.session.accessToken = idToken; // Store ID token for API calls
+
+    console.log(`ID Token authentication successful for user: ${userEmail} (${userId}) on site: ${siteId}`);
+
+    res.json({
+      success: true,
+      sessionToken: sessionToken,
+      user: {
+        id: userId,
+        email: userEmail
+      },
+      siteId: siteId,
+      message: 'Authentication successful'
+    });
+
+  } catch (error) {
+    console.error('ID Token verification error:', error);
+    
+    if (error.response?.status === 401) {
+      return res.status(401).json({
+        success: false,
+        error: 'Invalid ID token',
+        message: 'The provided ID token is invalid or expired'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      error: 'Authentication failed',
+      message: error.message || 'Unknown error occurred'
+    });
+  }
 });
 
 // OAuth Authorization endpoint using official Webflow approach
@@ -446,21 +601,35 @@ app.get('/deep-link', async (req, res) => {
 // Get pages endpoint
 app.get('/pages', async (req, res) => {
   try {
-    const accessToken = getUserToken(req);
-    const siteId = req.session.siteId;
-
-    if (!accessToken) {
+    // Check for session token in Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ 
         error: 'Unauthorized',
-        message: 'Please authorize the app first',
-        authorizeUrl: '/auth'
+        message: 'Please authenticate first',
+        authEndpoint: '/auth/id-token'
       });
     }
 
-    if (!siteId) {
-      return res.status(400).json({ 
-        error: 'No site ID found',
-        message: 'Please complete OAuth authorization first'
+    const sessionToken = authHeader.substring(7);
+    const sessionData = verifySessionToken(sessionToken);
+    
+    if (!sessionData) {
+      return res.status(401).json({ 
+        error: 'Invalid session',
+        message: 'Session token is invalid or expired',
+        authEndpoint: '/auth/id-token'
+      });
+    }
+
+    const { userId, siteId } = sessionData;
+    const accessToken = req.session?.accessToken;
+
+    if (!accessToken) {
+      return res.status(401).json({ 
+        error: 'No access token',
+        message: 'Please re-authenticate',
+        authEndpoint: '/auth/id-token'
       });
     }
 
@@ -527,13 +696,36 @@ app.patch('/pages/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { seo } = req.body;
-    const accessToken = getUserToken(req);
+    
+    // Check for session token in Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ 
+        error: 'Unauthorized',
+        message: 'Please authenticate first',
+        authEndpoint: '/auth/id-token'
+      });
+    }
+
+    const sessionToken = authHeader.substring(7);
+    const sessionData = verifySessionToken(sessionToken);
+    
+    if (!sessionData) {
+      return res.status(401).json({ 
+        error: 'Invalid session',
+        message: 'Session token is invalid or expired',
+        authEndpoint: '/auth/id-token'
+      });
+    }
+
+    const { userId, siteId } = sessionData;
+    const accessToken = req.session?.accessToken;
 
     if (!accessToken) {
       return res.status(401).json({ 
-        error: 'Unauthorized',
-        message: 'Please authorize the app first',
-        authorizeUrl: '/auth'
+        error: 'No access token',
+        message: 'Please re-authenticate',
+        authEndpoint: '/auth/id-token'
       });
     }
 
@@ -694,6 +886,18 @@ app.get('/site', async (req, res) => {
 
 // Logout endpoint
 app.post('/logout', (req, res) => {
+  // Check for session token in Authorization header
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const sessionToken = authHeader.substring(7);
+    const sessionData = verifySessionToken(sessionToken);
+    
+    if (sessionData) {
+      // Remove session from active sessions
+      activeSessions.delete(sessionData.sessionId);
+    }
+  }
+  
   clearUserSession(req);
   res.json({ 
     success: true,
