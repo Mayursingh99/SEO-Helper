@@ -599,8 +599,21 @@ app.get('/deep-link', async (req, res) => {
 // Get pages endpoint
 app.get('/pages', async (req, res) => {
   try {
-    const accessToken = getUserToken(req);
-    const siteId = req.session.siteId;
+    // Check for access token in Authorization header first, then session
+    let accessToken = null;
+    let siteId = null;
+    
+    // Check Authorization header
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      accessToken = authHeader.substring(7);
+      // For header-based auth, get siteId from X-Site-ID header or session
+      siteId = req.headers['x-site-id'] || req.session?.siteId;
+    } else {
+      // Fallback to session-based auth
+      accessToken = getUserToken(req);
+      siteId = req.session?.siteId;
+    }
 
     if (!accessToken) {
       return res.status(401).json({ 
@@ -680,7 +693,18 @@ app.patch('/pages/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { seo } = req.body;
-    const accessToken = getUserToken(req);
+    
+    // Check for access token in Authorization header first, then session
+    let accessToken = null;
+    
+    // Check Authorization header
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      accessToken = authHeader.substring(7);
+    } else {
+      // Fallback to session-based auth
+      accessToken = getUserToken(req);
+    }
 
     if (!accessToken) {
       return res.status(401).json({ 

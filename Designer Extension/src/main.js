@@ -163,7 +163,15 @@ const App = () => {
       setLoading(true);
       setError("");
       
-      const response = await api.get('/pages');
+      // Get current site info
+      const siteInfo = await webflow.getSiteInfo();
+      const siteId = siteInfo.siteId;
+      
+      const response = await api.get('/pages', {
+        headers: {
+          'X-Site-ID': siteId
+        }
+      });
       
       if (response.data && response.data.pages) {
         setPages(response.data.pages);
@@ -342,11 +350,19 @@ const App = () => {
       setSaving(true);
       setError("");
       
+      // Get current site info
+      const siteInfo = await webflow.getSiteInfo();
+      const siteId = siteInfo.siteId;
+      
       // Update page SEO via backend API
       await api.patch(`/pages/${editingPage.id}`, {
         seo: {
           title: seoTitle || "",
           description: seoDescription || ""
+        }
+      }, {
+        headers: {
+          'X-Site-ID': siteId
         }
       });
       
