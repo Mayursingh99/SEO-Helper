@@ -113,7 +113,9 @@ const App = () => {
               setIsAuthenticated(false);
             }
           } else {
+            // No stored token, user needs to authenticate
             setIsAuthenticated(false);
+            console.log('No stored OAuth token found. User needs to authenticate.');
           }
         } catch (e) {
           console.error('Initialization error:', e);
@@ -129,9 +131,15 @@ const App = () => {
     // Add message listener for OAuth callbacks
     const handleMessage = (event) => {
       // Only accept messages from our backend domain
-      if (event.origin !== BACKEND_URL.replace('https://', '').replace('http://', '')) {
+      const allowedOrigin = BACKEND_URL.replace('https://', '').replace('http://', '');
+      console.log('Message received from origin:', event.origin, 'Expected:', allowedOrigin);
+      
+      if (event.origin !== allowedOrigin) {
+        console.log('Message origin mismatch, ignoring');
         return;
       }
+
+      console.log('OAuth message received:', event.data);
 
       if (event.data.type === 'OAUTH_SUCCESS') {
         const { accessToken, siteId, siteShortName } = event.data;
@@ -216,12 +224,9 @@ const App = () => {
           clearInterval(checkClosed);
           window.webflowOAuthPopup = null;
           
-          // Try to load pages after popup closes
-          setTimeout(() => {
-            if (!isAuthenticated) {
-              loadPages();
-            }
-          }, 1000);
+          // Popup closed, but don't automatically try to load pages
+          // The OAuth success message will handle authentication
+          console.log('OAuth popup closed');
         }
       }, 1000);
       
@@ -237,6 +242,8 @@ const App = () => {
   // Handle OAuth success
   const handleOAuthSuccess = async (accessToken, siteId, siteShortName) => {
     try {
+      console.log('OAuth success received:', { accessToken: accessToken ? 'present' : 'missing', siteId, siteShortName });
+      
       // Store the token
       const tokenData = {
         accessToken: accessToken,
@@ -245,9 +252,11 @@ const App = () => {
         siteShortName: siteShortName
       };
       localStorage.setItem('seo-helper-oauth-token', JSON.stringify(tokenData));
+      console.log('OAuth token stored in localStorage');
       
       // Set token in headers
       api.defaults.headers.common['Authorization'] = `Bearer ${accessToken}`;
+      console.log('Authorization header set');
       
       // Update site info if needed
       if (selectedSite && selectedSite.id !== siteId) {
@@ -258,6 +267,7 @@ const App = () => {
       }
       
       // Load pages
+      console.log('Attempting to load pages...');
       await loadPages();
       
       setSuccessMessage('Successfully connected to Webflow!');
